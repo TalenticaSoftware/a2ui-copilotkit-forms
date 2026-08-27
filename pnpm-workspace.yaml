@@ -1,0 +1,8 @@
+# Not a workspace — this file is where pnpm 11 reads settings from.
+#
+# Same shape portal-lite uses next door, which is the version-correct key here:
+# esbuild links a platform binary in its postinstall and pnpm refuses to run
+# anything until that is allowed. @scarf/scarf is analytics, declined on purpose.
+allowBuilds:
+  esbuild: true
+  '@scarf/scarf': false
