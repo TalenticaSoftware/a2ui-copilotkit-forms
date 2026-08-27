@@ -100,6 +100,16 @@ const runtime = new CopilotRuntime({
   agents: { default: agent },
   a2ui: {
     schema: buildCatalog(),
+    /**
+     * Without this, A2UI is "enabled" and does nothing.
+     *
+     * The middleware gates tool injection on this flag and it defaults to
+     * falsy, so the render tool is never added to the agent's tools. The run
+     * still succeeds, `/info` still reports `a2uiEnabled: true`, and the agent —
+     * having no way to draw anything — answers in prose. It even says "here is
+     * a register form" while rendering nothing. See F9.
+     */
+    injectA2UITool: true,
     recovery: { debugExposure: 'verbose', showProgressTokens: true },
   },
 })

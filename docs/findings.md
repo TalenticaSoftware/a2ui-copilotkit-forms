@@ -131,3 +131,92 @@ a real agent producing a real recipe, because that needs an API key.
 Recorded rather than assumed. Until a live run happens, "the agent's recipe
 renders with our components" is a design claim, not a result — and the whole
 point of this file is that the two are not the same thing.
+
+## F9 — `a2uiEnabled: true` with no tool injected, and the agent lies about it `[hit]`
+
+The headline finding so far.
+
+`new CopilotRuntime({ a2ui: { schema } })` reports `"a2uiEnabled": true` from
+`/info`, injects the catalog as context, and **injects no render tool**. The
+middleware gates that on a separate flag:
+
+```js
+this.config.injectA2UITool ? this.injectToolGuidelines(this.injectToolAndFlag(i)) : i
+```
+
+`injectA2UITool` has no default. The runtime only fills one in when the CLIENT
+advertises a catalog (`injectA2UITool ?? (providerA2UIHasCatalog ? true : void 0)`),
+so a server-configured catalog alone leaves it undefined and the tool never
+exists. `RunAgentInput.tools` was `[]`.
+
+What a person sees: asking "I need a register form" returns
+
+> "Here is a register form containing the essential fields: email address and
+> password. If you need additional fields… please specify exactly what you
+> require."
+
+Nothing was rendered. The agent had no way to draw anything, so it described a
+form and said "here is" — narrating a thing that does not exist, beside a UI
+that shows nothing. This is Second Brain's F24 arriving through a different
+door, and it is worse here because every observable signal says the feature is
+on: `a2uiEnabled: true`, no error, no warning, HTTP 200.
+
+Reproduce: omit `injectA2UITool`, ask for a form, then read
+`RunAgentInput.tools` in the `/run` request body.
+
+Fixed by setting `injectA2UITool: true` explicitly.
+
+## F10 — Our catalog never reached the agent `[hit]`
+
+With A2UI configured server-side, the context injected into the run was the
+**basic catalog**:
+
+```
+"Available A2UI catalog:
+ - https://a2ui.org/specification/v0_9/basic_catalog.json (basic catalog)"
+```
+
+`catalogId` was the basic one and `Form` appeared nowhere. The agent was offered
+`Text`, `Image`, `Icon`, `Video` — nothing that can express a form.
+
+Two candidate causes, not yet separated:
+
+1. The client's `createA2UIMessageRenderer({ catalog })` does not advertise the
+   custom catalog into the run context — the capabilities line lists only the
+   basic catalog while claiming to list "custom component definitions the client
+   can render".
+2. Our server-side `schema` is shaped wrongly and is being ignored (see F11),
+   leaving the client's advertisement in place.
+
+## F11 — An A2UI catalog entry is not a plain JSON Schema `[reasoned]`
+
+Probable root cause of F10, and of the empty surface that follows it.
+
+We modelled the catalog as one `Form` component whose props are the whole form
+spec, generated with `z.toJSONSchema`. The basic catalog's entries do not look
+like that. Each is an envelope:
+
+```
+"Text": { "allOf": [ { "$ref": "common_types.json#/$defs/ComponentCommon" },
+                     { "properties": { "component": { "const": "Text" }, … },
+                       "required": ["component", "text"] } ] }
+```
+
+And the middleware only emits components whose items satisfy
+`typeof f.component === "string"`. So an A2UI component is a NODE carrying its
+own `component` discriminator inside a `ComponentCommon` envelope — not an
+arbitrary JSON Schema object.
+
+Consistent with what the agent actually produced once the tool existed:
+
+```json
+{"surfaceId":"login-form","components":[{ }],"data":{}}
+```
+
+One empty object. It called the tool, had no component vocabulary it could
+express, and emitted nothing usable. The middleware then never emits a surface,
+so the skeleton says **"Building interface · ~240 tokens"** forever — no error,
+no timeout, no failure state. F2's silence, in its most expensive form.
+
+Next step: reshape `buildCatalog()` to emit v0.9 component envelopes rather than
+a bare JSON Schema, and re-check whether the context then carries `Form`.
