@@ -25,9 +25,12 @@ const RUNTIME_URL = import.meta.env.VITE_RUNTIME_URL ?? 'http://localhost:4100/a
  * the frozen-callback trap Portal-Lite hit when it derived state inside a
  * render callback.
  */
+/** Mirrors the server's A2UI_CATALOG. Both halves must agree or neither works. */
+const USE_CUSTOM_CATALOG = import.meta.env.VITE_A2UI_CATALOG === 'custom'
+
 const a2ui = createA2UIMessageRenderer({
   theme: a2uiDefaultTheme,
-  catalog: buildClientCatalog(submit),
+  ...(USE_CUSTOM_CATALOG ? { catalog: buildClientCatalog(submit) } : {}),
 })
 
 createRoot(document.getElementById('root')!).render(

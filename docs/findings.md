@@ -220,3 +220,59 @@ no timeout, no failure state. F2's silence, in its most expensive form.
 
 Next step: reshape `buildCatalog()` to emit v0.9 component envelopes rather than
 a bare JSON Schema, and re-check whether the context then carries `Form`.
+
+## F12 — A2UI cannot render with OpenAI: the render tool's schema forbids content `[hit]` / `[reasoned]`
+
+The biggest finding so far, and it is not about our catalog.
+
+Run with A2UI's OWN basic catalog — no custom schema, no custom renderer, the
+framework entirely as shipped — and ask for a register form. The agent calls
+`render_a2ui` and produces:
+
+```json
+{"surfaceId":"register-form","components":[{ },{ },{ },{ },{ }],"data":{}}
+```
+
+Five empty objects. It plainly worked out that a register form needs five
+components and could not describe a single one of them.
+
+`[hit]` — the observation. Raw `TOOL_CALL_ARGS` deltas show the model emitting
+`{`, then a run of TAB characters, then `}`, per component:
+
+```
+delta='{'  delta='\t'  delta='\t'  …  delta='}'
+```
+
+That is a model padding a space it is not allowed to write anything into.
+
+`[hit]` — the cause in the schema. `RENDER_A2UI_TOOL` declares:
+
+```js
+components: { type: "array", items: { type: "object" } }
+```
+
+`items` has no `properties`. The component vocabulary is delivered separately,
+as prose in a context block — it is not in the tool schema at all.
+
+`[reasoned]` — the attribution. `@ai-sdk/openai` passes `strict: strictJsonSchema`
+through to OpenAI's tool calling. Under strict structured output, a schema of
+`{type:"object"}` with no declared properties admits exactly one value: `{}`.
+Not confirmed on the wire; confirming it needs the outbound request body.
+
+Consequences, in order of severity:
+
+1. A2UI as shipped renders nothing through this OpenAI path — not our catalog,
+   not the basic one.
+2. Nothing reports the failure. The tool call succeeds, the run finishes, and
+   the surface never arrives, so the client shows "Building interface" forever.
+   No error, no timeout, no failed state.
+3. Every earlier finding about our own catalog (F10, F11) is unproven while this
+   holds. They may still be true; they are not the reason nothing renders.
+
+The control run was worth doing precisely because it moved the fault from our
+code to the framework, which is the opposite of what we expected and the more
+important answer.
+
+Untried: whether the same run against Anthropic behaves differently, since its
+tool calling does not enforce strict schemas the same way. That single test
+would turn the `[reasoned]` half into a `[hit]` and is the next thing to do.

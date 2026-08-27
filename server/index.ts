@@ -96,10 +96,24 @@ const agent = new BuiltInAgent({
  * than hiding it. The whole point of this app is to find out what happens when
  * the agent gets it wrong, and a collapsed expander is how that goes unnoticed.
  */
+/**
+ * Which box of bricks the agent gets.
+ *
+ * "basic" (default) leaves A2UI's own catalog in place — Text, TextField,
+ * CheckBox, Button, Column, Row, Card and the rest, which between them can
+ * already express a form. "custom" overrides it with ours.
+ *
+ * A switch rather than a decision, because the two are a control and an
+ * experiment. If basic renders and custom does not, the fault is our catalog.
+ * If neither renders, the fault is upstream of us — a much larger finding, and
+ * one we cannot claim while only ever having run the custom path.
+ */
+const USE_CUSTOM_CATALOG = process.env.A2UI_CATALOG === 'custom'
+
 const runtime = new CopilotRuntime({
   agents: { default: agent },
   a2ui: {
-    schema: buildCatalog(),
+    ...(USE_CUSTOM_CATALOG ? { schema: buildCatalog() } : {}),
     /**
      * Without this, A2UI is "enabled" and does nothing.
      *
@@ -124,10 +138,10 @@ app.get('/health', (_request, response) => {
     ok: true,
     model: MODEL,
     keyVariable,
-    catalogId: buildCatalog().catalogId,
+    catalogId: USE_CUSTOM_CATALOG ? buildCatalog().catalogId : 'basic',
     // Named so a mis-wired client shows up as a wrong component list rather
     // than as an empty chat with no explanation.
-    components: Object.keys(buildCatalog().components),
+    components: USE_CUSTOM_CATALOG ? Object.keys(buildCatalog().components) : ['(A2UI built-in)'],
   })
 })
 
@@ -141,5 +155,7 @@ app.use(
 app.listen(PORT, () => {
   console.log(`[server] listening on http://localhost:${PORT}`)
   console.log(`[server] copilotkit at /api/copilotkit · model ${MODEL}`)
-  console.log(`[server] a2ui catalog: ${buildCatalog().catalogId}`)
+  console.log(
+    `[server] a2ui catalog: ${USE_CUSTOM_CATALOG ? buildCatalog().catalogId : 'basic (A2UI built-in)'}`,
+  )
 })
