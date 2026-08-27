@@ -25,8 +25,15 @@ const RUNTIME_URL = import.meta.env.VITE_RUNTIME_URL ?? 'http://localhost:4100/a
  * the frozen-callback trap Portal-Lite hit when it derived state inside a
  * render callback.
  */
-/** Mirrors the server's A2UI_CATALOG. Both halves must agree or neither works. */
-const USE_CUSTOM_CATALOG = import.meta.env.VITE_A2UI_CATALOG === 'custom'
+/**
+ * Our catalog by default, because the surface names our `Form` component.
+ *
+ * The server no longer publishes a schema at all — the `renderForm` tool's own
+ * parameters are the contract the agent is held to. This half exists purely so
+ * the browser knows how to DRAW what arrives. Set VITE_A2UI_CATALOG=basic to
+ * fall back to A2UI's built-in widgets as a control.
+ */
+const USE_CUSTOM_CATALOG = import.meta.env.VITE_A2UI_CATALOG !== 'basic'
 
 const a2ui = createA2UIMessageRenderer({
   theme: a2uiDefaultTheme,

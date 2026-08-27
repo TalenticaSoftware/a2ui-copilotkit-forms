@@ -276,3 +276,60 @@ important answer.
 Untried: whether the same run against Anthropic behaves differently, since its
 tool calling does not enforce strict schemas the same way. That single test
 would turn the `[reasoned]` half into a `[hit]` and is the next thing to do.
+
+## F13 — It works, via the path neither reference implementation uses `[hit]`
+
+The fix, and the answer to F12.
+
+The middleware paints a surface from TWO sources: the tool it injects, and any
+tool whose result content parses as `{ a2ui_operations: [...] }`. Only the first
+is broken. So we turned `injectA2UITool` off, declared our own tool whose
+`parameters` are the real zod form schema, and returned the operations from its
+handler.
+
+Strict mode stops being an obstacle and becomes the point: the model is now held
+to the same seven field kinds the renderer can draw.
+
+Asked for a register form, the agent produced:
+
+```json
+{"title":"Register","description":"Create a new account…","submitLabel":"Register",
+ "fields":[{"name":"email","kind":"email","required":true,…},
+           {"name":"username","kind":"text","required":true,…},
+           {"name":"password","kind":"password","required":true,…}]}
+```
+
+Complete, valid, every `required` stated — and it rendered as our own shadcn
+form inside the conversation, password toggle and all. Filled in and submitted,
+the values arrived intact.
+
+### Why the reference implementations do not hit this
+
+Neither uses the injected tool. `a2ui-poc` has the model write A2UI JSON into
+its message body via `DirectJsonFormat`, and passes its catalog through a
+modifier named — with no ambiguity about what it is for —
+`remove_strict_validation`. The Second Brain dashboard emits state snapshots and
+paints from those. Both route around the exact place we got stuck.
+
+### The five questions the plan set, answered
+
+1. **Does the catalog constrain the agent?** Yes, once the constraint lives in a
+   tool schema rather than a prose context block. Every field came back as one
+   of our seven kinds.
+2. **What does a person see while it thinks?** A skeleton with a live token
+   count. It reads as progress — but it is also what a permanently stuck run
+   looks like (F12), with nothing to tell the two apart.
+3. **Does a rendered form survive streaming?** Yes. The register form kept its
+   values while a second form was generated and painted beside it. The module
+   store was the right call and the risk did not materialise.
+4. **Can the form send anything back?** Into the app, yes — submitted values
+   reach our store. Back to the AGENT is still untested; the middleware has a
+   `userAction` path (`processUserAction`) that was not exercised.
+5. **Catalog or prompt — which wins?** Not yet separated, and less interesting
+   now: the tool schema outranks both.
+
+### The acceptance test, met
+
+"I need a login form" produced Email, Password, a Login button, and nothing
+else. No phone number, no full name, no address. The absence was always the
+criterion, and it held.

@@ -5,6 +5,7 @@ import { BuiltInAgent, CopilotRuntime } from '@copilotkit/runtime/v2'
 import { createCopilotExpressHandler } from '@copilotkit/runtime/v2/express'
 import { buildCatalog } from '../src/lib/a2ui-catalog'
 import { SYSTEM_PROMPT } from './prompt'
+import { renderFormTool } from './formTool'
 
 /**
  * The server: a CopilotKit runtime with A2UI switched on, and nothing else.
@@ -81,6 +82,13 @@ const agent = new BuiltInAgent({
   model: MODEL,
   prompt: SYSTEM_PROMPT,
   maxSteps: 6,
+  /**
+   * Our tool, not the injected one. See server/formTool.ts for why.
+   *
+   * Its parameters are the real form schema, so the model fills a shape with
+   * actual fields rather than the propertyless object A2UI's own tool declares.
+   */
+  tools: [renderFormTool],
 })
 
 /**
@@ -123,7 +131,14 @@ const runtime = new CopilotRuntime({
      * having no way to draw anything — answers in prose. It even says "here is
      * a register form" while rendering nothing. See F9.
      */
-    injectA2UITool: true,
+    /**
+     * OFF. The injected tool cannot express anything under OpenAI strict
+     * calling (F12) — we supply `renderForm` instead and return
+     * `a2ui_operations` from it, which is the middleware's other painting path.
+     */
+    injectA2UITool: false,
+    /** Treat our tool's result as A2UI output. */
+    a2uiToolNames: ['renderForm'],
     recovery: { debugExposure: 'verbose', showProgressTokens: true },
   },
 })
