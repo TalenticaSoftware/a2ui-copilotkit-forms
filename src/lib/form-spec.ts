@@ -55,15 +55,16 @@ const fieldName = z
   .min(1)
   .max(60)
   .regex(/^[a-z][a-zA-Z0-9]*$/, 'Field names must be camelCase, starting with a letter.')
+  .describe('camelCase key for this answer, e.g. firstName. Unique within the form.')
 
 const optionSchema = z.object({
-  value: z.string().min(1).max(100),
-  label: z.string().min(1).max(100),
+  value: z.string().min(1).max(100).describe('Stored value, e.g. "mon".'),
+  label: z.string().min(1).max(100).describe('What the person reads, e.g. "Monday".'),
 })
 
 const fieldBase = {
   name: fieldName,
-  label: z.string().min(1).max(80),
+  label: z.string().min(1).max(80).describe('What the person reads above the control.'),
   /**
    * Stated, never inferred.
    *
@@ -72,9 +73,11 @@ const fieldBase = {
    * is no default here: the model must say, and an answer that stays silent is
    * an answer we reject rather than guess at.
    */
-  required: z.boolean(),
-  placeholder: z.string().max(100).optional(),
-  help: z.string().max(200).optional(),
+  required: z
+    .boolean()
+    .describe('Must this be filled in? State it either way; there is no default.'),
+  placeholder: z.string().max(100).optional().describe('Faint example text inside the control.'),
+  help: z.string().max(200).optional().describe('A short note under the control.'),
 }
 
 /**
@@ -86,16 +89,20 @@ const fieldBase = {
  * As a union it is unrepresentable: no options, no parse.
  */
 export const fieldSchema = z.discriminatedUnion('kind', [
-  z.object({ ...fieldBase, kind: z.literal('text') }),
-  z.object({ ...fieldBase, kind: z.literal('email') }),
-  z.object({ ...fieldBase, kind: z.literal('password') }),
-  z.object({ ...fieldBase, kind: z.literal('textarea') }),
-  z.object({ ...fieldBase, kind: z.literal('number') }),
-  z.object({ ...fieldBase, kind: z.literal('checkbox') }),
+  z.object({ ...fieldBase, kind: z.literal('text').describe(KIND_DESCRIPTIONS.text) }),
+  z.object({ ...fieldBase, kind: z.literal('email').describe(KIND_DESCRIPTIONS.email) }),
+  z.object({ ...fieldBase, kind: z.literal('password').describe(KIND_DESCRIPTIONS.password) }),
+  z.object({ ...fieldBase, kind: z.literal('textarea').describe(KIND_DESCRIPTIONS.textarea) }),
+  z.object({ ...fieldBase, kind: z.literal('number').describe(KIND_DESCRIPTIONS.number) }),
+  z.object({ ...fieldBase, kind: z.literal('checkbox').describe(KIND_DESCRIPTIONS.checkbox) }),
   z.object({
     ...fieldBase,
-    kind: z.literal('select'),
-    options: z.array(optionSchema).min(2, 'A select needs at least two options.').max(20),
+    kind: z.literal('select').describe(KIND_DESCRIPTIONS.select),
+    options: z
+      .array(optionSchema)
+      .min(2, 'A select needs at least two options.')
+      .max(20)
+      .describe('The choices. Real ones drawn from the request, never placeholders.'),
   }),
 ])
 
@@ -111,10 +118,18 @@ export type SelectField = Extract<Field, { kind: 'select' }>
  */
 export const formSpecSchema = z
   .object({
-    title: z.string().min(1).max(80),
-    description: z.string().max(200).optional(),
-    submitLabel: z.string().min(1).max(40),
-    fields: z.array(fieldSchema).min(1, 'A form needs at least one field.').max(20),
+    title: z.string().min(1).max(80).describe('The form\'s heading, e.g. "Create an account".'),
+    description: z.string().max(200).optional().describe('One line under the heading, if it helps.'),
+    submitLabel: z
+      .string()
+      .min(1)
+      .max(40)
+      .describe('What the button says. Name the action: "Create account", not "Submit".'),
+    fields: z
+      .array(fieldSchema)
+      .min(1, 'A form needs at least one field.')
+      .max(20)
+      .describe('Only the fields this form genuinely needs. Do not pad it.'),
   })
   .superRefine((spec, ctx) => {
     /**
