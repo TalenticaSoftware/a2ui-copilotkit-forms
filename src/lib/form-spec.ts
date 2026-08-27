@@ -116,7 +116,7 @@ export type SelectField = Extract<Field, { kind: 'select' }>
  * with thirty fields is a wrong answer, and a wrong answer that renders looks
  * enough like a right one to ship. Better to refuse it and see why.
  */
-export const formSpecSchema = z
+export const formSpecObject = z
   .object({
     title: z.string().min(1).max(80).describe('The form\'s heading, e.g. "Create an account".'),
     description: z.string().max(200).optional().describe('One line under the heading, if it helps.'),
@@ -131,6 +131,17 @@ export const formSpecSchema = z
       .max(20)
       .describe('Only the fields this form genuinely needs. Do not pad it.'),
   })
+
+/**
+ * The same form, plus the rule JSON Schema cannot express.
+ *
+ * Split from `formSpecObject` because both A2UI catalog APIs — the client's
+ * `createCatalog` and our own `z.toJSONSchema` — need a plain ZodObject, and a
+ * refinement wraps it into something neither accepts. The refined version is
+ * what actually parses an arriving answer, which is why the duplicate-name rule
+ * is still enforced even though it never reaches the wire.
+ */
+export const formSpecSchema = formSpecObject
   .superRefine((spec, ctx) => {
     /**
      * Two fields sharing a name means one silently overwrites the other's

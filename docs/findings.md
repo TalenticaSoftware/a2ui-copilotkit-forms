@@ -30,8 +30,15 @@ affordance, no failed state — the message simply sits there. The server log
 carries the real cause (`authentication_error: invalid x-api-key`), so the
 information exists and does not reach the screen.
 
-Reproduce: run the server with `ANTHROPIC_API_KEY=not-a-real-key`, send any
-message, watch the chat pane and then the server log.
+Reproduce: run the server with a deliberately invalid key, send any message,
+watch the chat pane and then the server log.
+
+Refined once the client was wired up: the information *does* reach the browser.
+The console carries
+`[CopilotKit] Error (agent_run_error_event) { code: INCOMPLETE_STREAM, message:
+"invalid x-api-key" }`. So this is not a missing signal — it is a signal that
+arrives and is never rendered. Whatever a person is shown for a failed run is a
+choice the host app has to make deliberately.
 
 Severity is higher than it looks. A person cannot tell "the agent is thinking"
 from "the run died", and the failure mode this app most needs to observe — the
@@ -64,3 +71,63 @@ This is now how the server names its model for every provider, not a workaround
 for one of them. `MODEL="openai/gpt-4.1"` is the default; the provider prefix
 also picks which API key variable is required, so changing provider is an .env
 edit rather than a code change.
+
+## F5 — The shipped schema helper silently downgrades validation `[hit]`
+
+`@copilotkit/a2ui-renderer` exports `extractSchema(definitions)` and documents it
+as "suitable for passing to the runtime's `a2ui.schema` config". It returns the
+LEGACY array format, `[{ name, description, props }]`.
+
+The middleware accepts that format and then degrades to structural-only
+validation — its own source says the semantic catalog "returns undefined for the
+legacy array form or no schema". So the documented path from client catalog to
+server schema quietly costs you the check that catches a wrong recipe, and
+nothing warns.
+
+Worked around by generating the v0.9 inline catalog on the server directly from
+zod (`src/lib/a2ui-catalog.ts`) and letting the client file supply renderers
+only.
+
+## F6 — The A2UI renderer needs zod 3; the app is on zod 4 `[hit]`
+
+`createCatalog(definitions, renderers)` type-checks renderers against zod props
+schemas, which is exactly the shape contract worth having. It cannot be used
+honestly from a zod-4 codebase: `@copilotkit/a2ui-renderer` 1.68.1 peer-depends
+on `zod ^3.25.75` and resolves its own 3.25.76, so a zod-4 object is rejected as
+missing `_parse`, `_cached`, `UnknownKeysParam` and a dozen other zod-3
+internals.
+
+There is no honest fix available to a caller. Installing zod 3 alongside means
+two zods and two schemas, which is the drift the design exists to prevent. The
+app casts at exactly one boundary and re-parses the props with the real zod-4
+schema before drawing, so the library's copy is a label rather than a check.
+
+Still open: whether the library reaches into the schema's zod-3 internals at run
+time. Needs a live agent run.
+
+## F7 — Two React copies, reported as a Rules-of-Hooks mistake `[hit]`
+
+Adding `@copilotkit/a2ui-renderer` produced a page full of "Invalid hook call…
+You might be breaking the Rules of Hooks", followed by
+`Cannot read properties of null (reading 'useState')`. The app renders nothing
+useful and the message points at your own code.
+
+It is not your code. Every React symlink on disk resolves to the same
+`react@19.2.8`; the duplication is in Vite's dependency pre-bundle, which
+produced two optimized copies (visible as two different `?v=` hashes on
+`react-dom_client.js`). `resolve.dedupe: ["react", "react-dom"]` plus clearing
+`node_modules/.vite` fixes it.
+
+Recorded because of how badly the error misdirects. Two of the three causes
+React suggests are wrong here, and the true one is third on the list.
+
+## F8 — Not yet answered: does any of this work end to end? `[reasoned]`
+
+Everything up to the model call is verified. The catalog is generated, the
+runtime reports `a2uiEnabled: true`, the client catalog is registered, and the
+renderer draws correctly from hand-written recipes. What has NOT been observed is
+a real agent producing a real recipe, because that needs an API key.
+
+Recorded rather than assumed. Until a live run happens, "the agent's recipe
+renders with our components" is a design claim, not a result — and the whole
+point of this file is that the two are not the same thing.
