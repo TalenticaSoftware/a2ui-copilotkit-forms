@@ -27,8 +27,9 @@ import type { FormValues } from './catalog'
  * structural-only validation, because semantic validation needs the v0.9 inline
  * catalog. Nothing warns. So the server keeps generating the inline form itself
  * (see `a2ui-catalog.ts`) and this file only supplies renderers. Recorded as F5.
- */
-/**
+ *
+ * ---
+ *
  * The cast, and why there is one.
  *
  * `@copilotkit/a2ui-renderer` 1.68.1 peer-depends on zod ^3 and resolves its own

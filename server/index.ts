@@ -3,7 +3,6 @@ import express from 'express'
 import cors from 'cors'
 import { BuiltInAgent, CopilotRuntime } from '@copilotkit/runtime/v2'
 import { createCopilotExpressHandler } from '@copilotkit/runtime/v2/express'
-import { buildCatalog } from '../src/lib/a2ui-catalog'
 import { SYSTEM_PROMPT } from './prompt'
 import { renderFormTool } from './formTool'
 
@@ -39,10 +38,12 @@ const MODEL = process.env.MODEL ?? 'openai/gpt-4.1'
  * miniature: one place knows about vendors, and nothing else branches on which
  * one is active.
  */
-const KEY_VARIABLE: Record<string, string> = {
-  openai: 'OPENAI_API_KEY',
-  anthropic: 'ANTHROPIC_API_KEY',
-  google: 'GOOGLE_API_KEY',
+const KEY_VARIABLE: Record<string, string[]> = {
+  openai: ['OPENAI_API_KEY'],
+  anthropic: ['ANTHROPIC_API_KEY'],
+  // GEMINI_API_KEY first because that is what a2ui-poc next door uses; the
+  // runtime itself reads GOOGLE_API_KEY, so we copy one to the other below.
+  google: ['GEMINI_API_KEY', 'GOOGLE_API_KEY'],
 }
 
 /**
@@ -55,19 +56,49 @@ const KEY_VARIABLE: Record<string, string> = {
  * a message, and die silently (see F2), so the person would see nothing at all.
  */
 const [provider] = MODEL.split('/')
-const keyVariable = KEY_VARIABLE[provider ?? '']
+const accepted = KEY_VARIABLE[provider ?? '']
 
-if (!keyVariable) {
+if (!accepted) {
   console.error(`[config] MODEL="${MODEL}" names an unknown provider "${provider}".`)
   console.error(`[config] Expected one of: ${Object.keys(KEY_VARIABLE).join(', ')} — as "provider/model".`)
   process.exit(1)
 }
 
-if (!process.env[keyVariable]) {
-  console.error(`[config] MODEL="${MODEL}" needs ${keyVariable}, which is not set.`)
+const keyVariable = accepted.find((name) => process.env[name])
+
+if (!keyVariable) {
+  console.error(`[config] MODEL="${MODEL}" needs one of: ${accepted.join(' or ')}.`)
   console.error('[config] Put it in prompt-to-form/.env — see .env.example.')
   process.exit(1)
 }
+
+/**
+ * The runtime reads the provider's canonical variable, which is not always the
+ * one a person has to hand. Copying rather than renaming keeps whatever they
+ * already had working.
+ */
+const canonical = accepted[accepted.length - 1]!
+if (!process.env[canonical]) process.env[canonical] = process.env[keyVariable]
+
+/**
+ * The whole experiment, as one variable.
+ *
+ * "own" (default) — our `renderForm` tool and our shadcn components. Works with
+ * OpenAI, at the cost of a rendering layer we maintain.
+ *
+ * "a2ui" — A2UI exactly as documented: it injects its own render tool, the
+ * agent composes from A2UI's own components, and A2UI's renderer draws them. If
+ * this works, most of src/lib is unnecessary.
+ *
+ * It failed on OpenAI (F12) because the injected tool declares its components
+ * as an object with no properties, and strict tool calling then admits only
+ * `{}`. Whether a provider that does not enforce strict schemas — Gemini —
+ * behaves differently is the open question, and this switch is how it gets
+ * asked without editing code.
+ *
+ * VITE_RENDER_MODE must match on the client.
+ */
+const RENDER_MODE = process.env.RENDER_MODE === 'a2ui' ? 'a2ui' : 'own'
 
 /**
  * `maxSteps` must exceed 1.
@@ -88,57 +119,37 @@ const agent = new BuiltInAgent({
    * Its parameters are the real form schema, so the model fills a shape with
    * actual fields rather than the propertyless object A2UI's own tool declares.
    */
-  tools: [renderFormTool],
+  tools: RENDER_MODE === 'own' ? [renderFormTool] : [],
 })
 
-/**
- * A2UI, switched on in one place.
- *
- * `schema` is the catalog generated from the field vocabulary. The middleware
- * injects a render tool into the agent's tools, feeds it this catalog as
- * context, and validates whatever comes back against it — none of which we
- * write.
- *
- * `recovery.debugExposure: 'verbose'` is a development choice and should not
- * survive to anything public: it opens the retry/error detail in the UI rather
- * than hiding it. The whole point of this app is to find out what happens when
- * the agent gets it wrong, and a collapsed expander is how that goes unnoticed.
- */
-/**
- * Which box of bricks the agent gets.
- *
- * "basic" (default) leaves A2UI's own catalog in place — Text, TextField,
- * CheckBox, Button, Column, Row, Card and the rest, which between them can
- * already express a form. "custom" overrides it with ours.
- *
- * A switch rather than a decision, because the two are a control and an
- * experiment. If basic renders and custom does not, the fault is our catalog.
- * If neither renders, the fault is upstream of us — a much larger finding, and
- * one we cannot claim while only ever having run the custom path.
- */
-const USE_CUSTOM_CATALOG = process.env.A2UI_CATALOG === 'custom'
 
 const runtime = new CopilotRuntime({
   agents: { default: agent },
   a2ui: {
-    ...(USE_CUSTOM_CATALOG ? { schema: buildCatalog() } : {}),
     /**
-     * Without this, A2UI is "enabled" and does nothing.
+     * Deliberately OFF, and the flag is worth understanding in both positions.
      *
-     * The middleware gates tool injection on this flag and it defaults to
-     * falsy, so the render tool is never added to the agent's tools. The run
-     * still succeeds, `/info` still reports `a2uiEnabled: true`, and the agent —
-     * having no way to draw anything — answers in prose. It even says "here is
-     * a register form" while rendering nothing. See F9.
+     * Left undefined, the middleware injects nothing: A2UI reports itself
+     * enabled, `/info` says `a2uiEnabled: true`, and the agent — with no way to
+     * draw — answers in prose while claiming "here is a register form" (F9).
+     *
+     * Set to true, the injected tool declares its components as
+     * `items: { type: "object" }`, which under OpenAI strict calling admits
+     * exactly one value: `{}`. The agent emits empty components and the surface
+     * never paints (F12).
+     *
+     * So we supply `renderForm` instead — a tool whose parameters are the real
+     * form schema — and return `a2ui_operations` from it, which is the
+     * middleware's other painting path.
      */
+    injectA2UITool: RENDER_MODE === 'a2ui',
+    /** In "own" mode, treat our tool's result as A2UI output. */
+    ...(RENDER_MODE === 'own' ? { a2uiToolNames: ['renderForm'] } : {}),
     /**
-     * OFF. The injected tool cannot express anything under OpenAI strict
-     * calling (F12) — we supply `renderForm` instead and return
-     * `a2ui_operations` from it, which is the middleware's other painting path.
+     * Verbose recovery detail is a development choice, and should not survive
+     * to anything public. The point of this app is to see what happens when the
+     * agent gets it wrong, and a collapsed expander is how that goes unnoticed.
      */
-    injectA2UITool: false,
-    /** Treat our tool's result as A2UI output. */
-    a2uiToolNames: ['renderForm'],
     recovery: { debugExposure: 'verbose', showProgressTokens: true },
   },
 })
@@ -153,10 +164,10 @@ app.get('/health', (_request, response) => {
     ok: true,
     model: MODEL,
     keyVariable,
-    catalogId: USE_CUSTOM_CATALOG ? buildCatalog().catalogId : 'basic',
-    // Named so a mis-wired client shows up as a wrong component list rather
-    // than as an empty chat with no explanation.
-    components: USE_CUSTOM_CATALOG ? Object.keys(buildCatalog().components) : ['(A2UI built-in)'],
+    renderMode: RENDER_MODE,
+    // Named so a mis-wired client shows up as a wrong tool list rather than as
+    // an empty chat with no explanation.
+    tool: RENDER_MODE === 'own' ? 'renderForm (ours)' : 'render_a2ui (injected)',
   })
 })
 
@@ -171,6 +182,9 @@ app.listen(PORT, () => {
   console.log(`[server] listening on http://localhost:${PORT}`)
   console.log(`[server] copilotkit at /api/copilotkit · model ${MODEL}`)
   console.log(
-    `[server] a2ui catalog: ${USE_CUSTOM_CATALOG ? buildCatalog().catalogId : 'basic (A2UI built-in)'}`,
+    `[server] render mode: ${RENDER_MODE}` +
+      (RENDER_MODE === 'own'
+        ? ' — our renderForm tool, our components'
+        : ' — A2UI as documented: injected tool, A2UI components'),
   )
 })

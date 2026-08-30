@@ -26,18 +26,17 @@ const RUNTIME_URL = import.meta.env.VITE_RUNTIME_URL ?? 'http://localhost:4100/a
  * render callback.
  */
 /**
- * Our catalog by default, because the surface names our `Form` component.
+ * Must match the server's RENDER_MODE.
  *
- * The server no longer publishes a schema at all — the `renderForm` tool's own
- * parameters are the contract the agent is held to. This half exists purely so
- * the browser knows how to DRAW what arrives. Set VITE_A2UI_CATALOG=basic to
- * fall back to A2UI's built-in widgets as a control.
+ * "own" registers our catalog so the surface's `Form` component draws with
+ * shadcn. "a2ui" registers nothing, leaving A2UI's own renderer and components
+ * to draw whatever the agent composed.
  */
-const USE_CUSTOM_CATALOG = import.meta.env.VITE_A2UI_CATALOG !== 'basic'
+const RENDER_MODE = import.meta.env.VITE_RENDER_MODE === 'a2ui' ? 'a2ui' : 'own'
 
 const a2ui = createA2UIMessageRenderer({
   theme: a2uiDefaultTheme,
-  ...(USE_CUSTOM_CATALOG ? { catalog: buildClientCatalog(submit) } : {}),
+  ...(RENDER_MODE === 'own' ? { catalog: buildClientCatalog(submit) } : {}),
 })
 
 createRoot(document.getElementById('root')!).render(

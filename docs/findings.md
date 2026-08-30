@@ -333,3 +333,70 @@ paints from those. Both route around the exact place we got stuck.
 "I need a login form" produced Email, Password, a Login button, and nothing
 else. No phone number, no full name, no address. The absence was always the
 criterion, and it held.
+
+## F14 — F12 is provider-specific, and confirmed. A2UI works as documented on Gemini `[hit]`
+
+Same code, same catalog, same injected tool — only the model changed. `RENDER_MODE=a2ui`
+with `google/gemini-3.6-flash` produced a complete surface:
+
+```json
+{"surfaceId":"register-form","components":[
+  {"component":"Column","id":"root","children":["title","name-field",…],"gap":16},
+  {"component":"Title","id":"title","text":"Register"},
+  {"component":"TextField","id":"name-field","label":"Full Name","required":true,
+   "value":{"path":"/fullName"}},
+  …
+  {"component":"Button","id":"submit-button","label":"Register",
+   "action":{"event":{"name":"register_user","context":{…}}}}
+],"data":{"fullName":"","email":"","password":""}}
+```
+
+Real components, real props, data bindings, an action event. It rendered — a
+working register form drawn entirely by A2UI's own renderer, with **none** of our
+`src/lib` involved.
+
+So the `[reasoned]` half of F12 is now settled. The tool schema declaring
+`items: { type: "object" }` is only fatal where the provider enforces strict
+schemas. OpenAI does; Gemini does not.
+
+Note also that `gemini-2.5-flash` — the newest Gemini in CopilotKit's own model
+union — returns 404 "no longer available to new users". The union is stale; the
+string passes through, so `google/gemini-3.6-flash` works anyway.
+
+## F15 — The middleware reports "rendered" for components that do not exist `[hit]`
+
+In the same run, Gemini invented three component names: `Title`, `EmailInput`
+and `PasswordInput`. None is in A2UI's catalog, whose renderer supports `Text`,
+`TextField`, `Button`, `CheckBox`, `Column`, `Row`, `Card` and a dozen others.
+
+The middleware emitted `createSurface`, `updateComponents`, `updateDataModel`
+and returned `{"status":"rendered"}`.
+
+The cause is in its own source: `getValidationCatalog()` returns undefined
+unless `config.schema` carries an inline catalog, and validation then degrades
+to structural-only — it checks `typeof f.component === "string"` and nothing
+more. With A2UI's built-in catalog and no explicit schema, ANY component name
+passes.
+
+This compounds F5: the shipped helper for producing that schema emits the legacy
+array format, which also yields no validation catalog. Both documented routes to
+a validated catalog end in no validation, silently.
+
+## F16 — A2UI's own widgets drop constraints the agent expressed `[hit]`
+
+The rendered form, read from the DOM:
+
+| Field | Input type | `required` |
+|---|---|---|
+| Full Name | `text` | false |
+| Email Address | `text` | false |
+| Password | `password` | false |
+
+Gemini sent `required: true` on all three, and named the middle one an email
+field. What reached the browser was three inputs, one of them masked, none
+required and none typed as email.
+
+Not a bug so much as a ceiling: A2UI's catalog is a generic widget set, so a
+form drawn from it is a form without validation. That is the real trade against
+our own renderer — which enforces `required`, validates email, and refuses a
+submit — rather than the aesthetic difference it first appears to be.
