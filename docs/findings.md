@@ -400,3 +400,78 @@ Not a bug so much as a ceiling: A2UI's catalog is a generic widget set, so a
 form drawn from it is a form without validation. That is the real trade against
 our own renderer — which enforces `required`, validates email, and refuses a
 submit — rather than the aesthetic difference it first appears to be.
+
+## F17 — The catalog goes on the PROVIDER, not the message renderer `[hit]`
+
+The answer to F10, and the reason our catalog never reached the agent.
+
+`createA2UIMessageRenderer({ catalog })` draws a surface. It does not advertise
+one. Only `CopilotKitProvider`'s `a2ui={{ catalog }}` mounts
+`A2UICatalogContext`, whose own doc comment says it "renders agent context
+describing the available A2UI catalog and custom components" — adding two
+context entries to every run:
+
+- *"A2UI catalog capabilities: available catalog IDs and custom component
+  definitions the client can render"*
+- the component schemas, in the v0.9 inline format via
+  `extractCatalogComponentSchemas`
+
+That is the `supportedCatalogIds` negotiation the A2UI spec describes. Without
+it the agent is told about the basic catalog only, no matter what the browser
+can actually draw.
+
+Both props are typed `catalog?: any`, both named `catalog`, and only one does
+the thing you need. Neither is documented: CopilotKit's A2UI page shows
+`a2ui: {}` on the server and a `theme` on the client, and covers custom catalogs
+nowhere — while the A2UI spec calls them the normal case, since "most production
+applications will define their own catalog to reflect their specific design
+system".
+
+With the prop moved, the agent emitted our component correctly on the first try:
+
+```json
+{"components":[{"component":"Form","id":"root","title":"Create an Account",
+  "submitLabel":"Register","fields":[
+    {"name":"name","kind":"text","label":"Full Name","required":true}, …]}]}
+```
+
+and it rendered as our shadcn form — required marks, password toggle and all.
+**A2UI's documented path, with our design system.** That is the middle row of the
+grid, and it works.
+
+## F18 — A2UI paints partial frames, and a strict validator rejects them `[hit]`
+
+Non-deterministic, which is what makes it dangerous.
+
+The first run of the above showed our failure card:
+
+```
+fields.0.name: Invalid input: expected string, received undefined
+fields.1.name: …
+```
+
+The agent's output was complete and correct — verified on the wire. The
+middleware emits `updateComponents` REPEATEDLY as the tool's arguments stream
+in, so our renderer is handed the half-built object several times, and one of
+those intermediate frames was the last thing it parsed.
+
+The second, identical run rendered perfectly. Same code, same prompt, different
+outcome.
+
+Our own tool does not have this problem: `execute` returns the finished spec in
+one piece, so no partial frame exists. It is specific to the injected tool's
+streamed arguments.
+
+The fix is not to loosen validation — a partial frame is exactly the "half a
+form" case worth refusing. It is to distinguish "not finished yet" from
+"invalid", which the surface lifecycle already knows and does not pass on.
+
+## The grid, complete
+
+| | OpenAI | Gemini |
+|---|---|---|
+| A2UI tool + basic catalog | ❌ empty components (F12) | ✅ renders, no validation (F16) |
+| A2UI tool + **our** catalog | ❌ (F12 is about the tool) | ✅ **shadcn, our validation** (F17), flaky (F18) |
+| **Our tool** + our catalog | ✅ | ✅ |
+
+Only the bottom row works on both providers, and only it is deterministic.

@@ -1,10 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import {
-  CopilotKitProvider,
-  createA2UIMessageRenderer,
-  a2uiDefaultTheme,
-} from '@copilotkit/react-core/v2'
+import { CopilotKitProvider } from '@copilotkit/react-core/v2'
 import './index.css'
 import App from './App.tsx'
 import { buildClientCatalog } from '@/lib/a2ui-client-catalog'
@@ -18,30 +14,34 @@ import { submit } from '@/lib/submission-store'
 const RUNTIME_URL = import.meta.env.VITE_RUNTIME_URL ?? 'http://localhost:4100/api/copilotkit'
 
 /**
- * Built once, at module scope.
+ * Which component catalog the browser offers. Independent of which TOOL the
+ * server gives the agent (`RENDER_MODE`), because those are two separate axes:
  *
- * The submit handler is a module function rather than a closure over component
- * state, so nothing here captures a value that a later render would replace —
- * the frozen-callback trap Portal-Lite hit when it derived state inside a
- * render callback.
+ *              │ A2UI's tool        │ our renderForm tool
+ *   ───────────┼────────────────────┼─────────────────────
+ *   basic      │ generic widgets    │ n/a
+ *   ours       │ shadcn, A2UI-composed │ shadcn, we compose
  */
-/**
- * Must match the server's RENDER_MODE.
- *
- * "own" registers our catalog so the surface's `Form` component draws with
- * shadcn. "a2ui" registers nothing, leaving A2UI's own renderer and components
- * to draw whatever the agent composed.
- */
-const RENDER_MODE = import.meta.env.VITE_RENDER_MODE === 'a2ui' ? 'a2ui' : 'own'
+const CATALOG = import.meta.env.VITE_CATALOG === 'basic' ? 'basic' : 'ours'
 
-const a2ui = createA2UIMessageRenderer({
-  theme: a2uiDefaultTheme,
-  ...(RENDER_MODE === 'own' ? { catalog: buildClientCatalog(submit) } : {}),
-})
+/**
+ * The catalog goes on the PROVIDER, not on a message renderer.
+ *
+ * This is the piece we had wrong. `createA2UIMessageRenderer({ catalog })` can
+ * draw a surface, but only the provider's `a2ui.catalog` mounts
+ * `A2UICatalogContext` — which is what tells the agent, in its run context,
+ * "here are the catalog ids and custom components this client can render",
+ * along with their JSON schemas in the v0.9 inline format.
+ *
+ * That is the `supportedCatalogIds` negotiation the A2UI spec describes, and
+ * without it the agent is only ever told about the basic catalog no matter what
+ * the browser can actually draw (F10).
+ */
+const a2ui = CATALOG === 'ours' ? { catalog: buildClientCatalog(submit) } : {}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <CopilotKitProvider runtimeUrl={RUNTIME_URL} renderActivityMessages={[a2ui]}>
+    <CopilotKitProvider runtimeUrl={RUNTIME_URL} a2ui={a2ui}>
       <App />
     </CopilotKitProvider>
   </StrictMode>,
