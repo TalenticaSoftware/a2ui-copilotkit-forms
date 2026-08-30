@@ -3,9 +3,8 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import type { Field, FormSpec } from '@/lib/form-spec'
-import { emptyValueFor, rendererFor, type FormValues } from '@/lib/catalog'
-import { errorsFor } from '@/lib/validate'
+import type { Field, FormSpec } from '@contract/form-spec'
+import { emptyValueFor, rendererFor, type FieldValue, type FormValues } from './fields'
 
 /**
  * Draws a form from a recipe.
@@ -22,6 +21,66 @@ import { errorsFor } from '@/lib/validate'
  * the questions this app exists to answer, and moving the state pre-emptively
  * would hide the answer.
  */
+
+/**
+ * Checking what a PERSON typed — a different job from `parseFormSpec`, which
+ * checks what the AGENT sent.
+ *
+ * Kept apart on purpose. A bad recipe is refused whole, because a register form
+ * quietly missing its password box is worse than no form. A person's answer is
+ * refused one field at a time, in place, with their other answers untouched.
+ */
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+function errorFor(field: Field, value: FieldValue): string | null {
+  if (field.kind === 'checkbox') {
+    /**
+     * The only way a checkbox fails: required, and unticked.
+     *
+     * The message deliberately does not repeat the label. A checkbox's label
+     * sits inches away, so "<label> is required" reads as "I accept the terms
+     * is required" — a sentence with the subject said twice and no verb where
+     * one is expected.
+     */
+    return field.required && value !== true ? 'This needs to be ticked.' : null
+  }
+
+  const text = String(value).trim()
+
+  if (!text) return field.required ? `${field.label} is required.` : null
+
+  if (field.kind === 'email' && !EMAIL.test(text)) {
+    return 'Enter a valid email address.'
+  }
+
+  if (field.kind === 'number' && Number.isNaN(Number(text))) {
+    return `${field.label} must be a number.`
+  }
+
+  if (field.kind === 'select') {
+    /**
+     * A value not on the list.
+     *
+     * Unreachable through the dropdown, and checked anyway: values also arrive
+     * as a prefill, and a select silently holding something it never offered is
+     * the kind of thing that surfaces as a rejected submit with no explanation.
+     */
+    const allowed = field.options.some((option) => option.value === text)
+    if (!allowed) return `Choose one of the listed options.`
+  }
+
+  return null
+}
+
+/** Every error on the form, keyed by field name. Empty means it can be sent. */
+function errorsFor(fields: Field[], values: FormValues): Record<string, string> {
+  const errors: Record<string, string> = {}
+  for (const field of fields) {
+    const problem = errorFor(field, values[field.name] ?? '')
+    if (problem) errors[field.name] = problem
+  }
+  return errors
+}
 
 export type FormRendererProps = {
   spec: FormSpec

@@ -15,6 +15,16 @@ import { z } from 'zod'
  */
 
 /**
+ * How this catalog and its one component are named on the wire.
+ *
+ * Both halves need these: the server stamps them onto the surface it emits, and
+ * the browser registers its renderer under the same names. They live here
+ * because a name only one side knows is not a contract.
+ */
+export const CATALOG_ID = 'prompt-to-form/v1'
+export const FORM_COMPONENT = 'Form'
+
+/**
  * Seven kinds, and adding an eighth is a deliberate decision.
  *
  * Written once, as a const array, so the model's allowed values, the TypeScript
@@ -187,3 +197,26 @@ export function parseFormSpec(value: unknown): ParseResult {
     }),
   }
 }
+
+
+/**
+ * What the schema cannot carry, and the agent still needs telling.
+ *
+ * JSON Schema can say a select needs at least two options. It cannot say "and
+ * they must be real ones, not Option 1 and Option 2" — that is a rule about
+ * meaning. It lives here rather than in the prompt file because these rules
+ * exist to protect the contract's guarantees, and reading them beside the
+ * contract is how they stay in step with it.
+ */
+export const CATALOG_RULES = [
+  'Use only the field kinds in the catalog. If the request needs something you ' +
+    'cannot express — a date, a file, a signature — say so in words instead of ' +
+    'substituting a text field that pretends to be one.',
+  'Never invent placeholder content. A select must carry real options drawn ' +
+    'from the request; "Option 1, Option 2" is a wrong answer, not a fallback.',
+  'State `required` on every field. It has no default and an omission is refused.',
+  'Prefer the narrowest kind that fits: email over text for an email address, ' +
+    'number over text for a quantity.',
+  'Do not pad. Extra plausible fields nobody asked for are the most common way ' +
+    'to get this wrong.',
+] as const

@@ -3,8 +3,8 @@ import { createRoot } from 'react-dom/client'
 import { CopilotKitProvider } from '@copilotkit/react-core/v2'
 import './index.css'
 import App from './App.tsx'
-import { buildClientCatalog } from '@/lib/a2ui-client-catalog'
-import { submit } from '@/lib/submission-store'
+import { buildClientCatalog } from '@/form/catalog'
+import { submit } from '@/form/submissions'
 
 /**
  * The runtime lives on its own port in development, so the URL is absolute and

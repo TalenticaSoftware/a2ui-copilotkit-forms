@@ -1,4 +1,4 @@
-import { CATALOG_RULES } from '../src/lib/a2ui-catalog'
+import { CATALOG_RULES } from '../contract/form-spec'
 
 /**
  * What the agent is told, beyond the catalog.

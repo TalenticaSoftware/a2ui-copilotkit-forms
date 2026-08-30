@@ -1,32 +1,24 @@
-import { useState, useSyncExternalStore } from 'react'
+import { useSyncExternalStore } from 'react'
 import { CopilotChat } from '@copilotkit/react-core/v2'
+import { clearSubmission, getSubmission, subscribe } from '@/form/submissions'
 import { Button } from '@/components/ui/button'
-import { FormRenderer } from '@/components/FormRenderer'
-import { SAMPLES } from '@/lib/sample-specs'
-import { clearSubmission, getSubmission, subscribe, submit } from '@/lib/submission-store'
 
 /**
- * Chat on the left, results on the right.
+ * Chat on the left, submitted values on the right.
  *
- * The form itself is drawn INSIDE the conversation now — an A2UI surface, using
- * our own components via the catalog registered in `main.tsx`. The right pane is
- * no longer a separate bench: it shows what a submitted form produced, and keeps
- * the hand-written recipes as a control, so a broken agent can still be told
- * apart from a broken renderer.
+ * The form is drawn INSIDE the conversation — an A2UI surface using our own
+ * components, registered on the provider in `main.tsx`. This file owns no form
+ * logic at all; it only shows what came back out of one.
  */
 export default function App() {
-  const [control, setControl] = useState<(typeof SAMPLES)[number]['id'] | null>(null)
-
   /**
-   * Read from the module store rather than holding submissions in state.
+   * Read from the module store rather than component state.
    *
-   * The A2UI form lives inside a chat message, which CopilotKit remounts as
-   * messages stream. A handler closing over this component's `setState` would
-   * be writing into whichever instance existed when the catalog was built.
+   * The form lives inside a chat message, which CopilotKit remounts as messages
+   * stream. A submit handler closing over this component's setState would be
+   * writing into whichever instance existed when the catalog was built.
    */
   const submission = useSyncExternalStore(subscribe, getSubmission, getSubmission)
-
-  const sample = control ? SAMPLES.find((entry) => entry.id === control)! : null
 
   return (
     <main className="flex h-svh flex-col lg:flex-row">
@@ -46,33 +38,18 @@ export default function App() {
         <header className="flex items-center justify-between gap-3 border-b px-5 py-4">
           <div className="flex flex-col gap-0.5">
             <h2 className="text-sm font-medium">Result</h2>
-            <p className="text-muted-foreground text-xs">
-              What a submitted form produced.
-            </p>
+            <p className="text-muted-foreground text-xs">What a submitted form produced.</p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {/* The control group: same renderer, recipe typed by hand. If these
-                draw and the agent's does not, the fault is upstream of us. */}
-            {SAMPLES.map((entry) => (
-              <Button
-                key={entry.id}
-                variant={entry.id === control ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => {
-                  setControl(entry.id === control ? null : entry.id)
-                  clearSubmission()
-                }}
-              >
-                {entry.label}
-              </Button>
-            ))}
-          </div>
+          {submission && (
+            <Button variant="outline" size="sm" onClick={clearSubmission}>
+              Clear
+            </Button>
+          )}
         </header>
 
-        <div className="flex flex-col gap-6 p-5">
+        <div className="p-5">
           {submission ? (
             <div className="flex flex-col gap-2">
-              <h3 className="text-sm font-medium">Submitted</h3>
               <pre className="bg-muted overflow-x-auto rounded-md p-4 font-mono text-xs">
                 {JSON.stringify(submission.values, null, 2)}
               </pre>
@@ -80,12 +57,9 @@ export default function App() {
                 That is the whole submit — the values are shown and discarded.
               </p>
             </div>
-          ) : sample ? (
-            <FormRenderer key={sample.id} spec={sample.spec} onSubmit={submit} />
           ) : (
             <p className="text-muted-foreground text-sm">
-              Ask for a form in the chat, or open one of the hand-written recipes
-              above to check the renderer on its own.
+              Ask for a form in the chat, fill it in, and the answers appear here.
             </p>
           )}
         </div>

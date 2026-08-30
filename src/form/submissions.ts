@@ -1,4 +1,4 @@
-import type { FormValues } from './catalog'
+import type { FormValues } from './fields'
 
 /**
  * Where a submitted A2UI form puts its answers.

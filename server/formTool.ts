@@ -1,6 +1,10 @@
 import { defineTool } from '@copilotkit/runtime/v2'
-import { formSpecObject, type FormSpec } from '../src/lib/form-spec'
-import { CATALOG_ID, FORM_COMPONENT } from '../src/lib/a2ui-catalog'
+import {
+  CATALOG_ID,
+  FORM_COMPONENT,
+  formSpecObject,
+  type FormSpec,
+} from '../contract/form-spec'
 
 /**
  * Our own render tool, replacing the one A2UI injects.

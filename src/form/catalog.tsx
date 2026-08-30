@@ -1,9 +1,13 @@
 import { createCatalog } from '@copilotkit/a2ui-renderer'
 import type { CatalogDefinitions } from '@copilotkit/a2ui-renderer'
-import { FormRenderer } from '@/components/FormRenderer'
-import { CATALOG_ID, FORM_COMPONENT } from './a2ui-catalog'
-import { formSpecObject, parseFormSpec } from './form-spec'
-import type { FormValues } from './catalog'
+import {
+  CATALOG_ID,
+  FORM_COMPONENT,
+  formSpecObject,
+  parseFormSpec,
+} from '@contract/form-spec'
+import { FormRenderer } from './FormRenderer'
+import type { FormValues } from './fields'
 
 /**
  * The browser half of the catalog: the same component names, drawn by OUR
