@@ -99,22 +99,6 @@ const runtime = new CopilotRuntime({
   agents: { default: agent },
   a2ui: {
     /**
-     * Deliberately OFF, and the flag is worth understanding in both positions.
-     *
-     * Left undefined, the middleware injects nothing: A2UI reports itself
-     * enabled, `/info` says `a2uiEnabled: true`, and the agent — with no way to
-     * draw — answers in prose while claiming "here is a register form" (F9).
-     *
-     * Set to true, the injected tool declares its components as
-     * `items: { type: "object" }`, which under OpenAI strict calling admits
-     * exactly one value: `{}`. The agent emits empty components and the surface
-     * never paints (F12).
-     *
-     * So we supply `renderForm` instead — a tool whose parameters are the real
-     * form schema — and return `a2ui_operations` from it, which is the
-     * middleware's other painting path.
-     */
-    /**
      * Without this the middleware injects nothing: A2UI reports itself enabled,
      * `/info` says `a2uiEnabled: true`, and the agent — with no way to draw —
      * answers in prose while claiming "here is a register form" (F9). It has no

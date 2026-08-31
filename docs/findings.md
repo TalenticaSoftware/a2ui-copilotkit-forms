@@ -657,3 +657,56 @@ model's.
 
 The custom tool did not have this problem — `renderForm` was the only tool, so
 "use our component" was not a decision the agent could get wrong.
+
+## F23 — A2UI's tool wants PRIMITIVES, not intents. Our design cannot be used through it `[hit]`
+
+The decisive result, and it closes the question F22 opened.
+
+`includeBasicCatalog: false`, so our `Form` is the only component the agent can
+name. Asked for a register form, it refused:
+
+> "I cannot render a registration form because the available component catalog
+> (prompt-to-form/v1) does not include the necessary input fields (such as text
+> fields, password inputs, or buttons) needed to build the form."
+
+Our catalog contains every one of those things — inside `Form`, whose props are
+a typed array of seven field kinds, each described. The agent read the catalog
+and concluded it could not build a form.
+
+So both positions of the switch fail, for the same underlying reason:
+
+| `includeBasicCatalog` | Result |
+|---|---|
+| `true` | Agent composes A2UI's Card/TextField/Button. Ignores ours. No validation, no shadcn (F22) |
+| `false` | Agent refuses, saying the catalog has no text fields or buttons |
+
+**A2UI's injected tool expects a catalog of small composable primitives.** It
+composes a tree; it does not fill one rich component. A "fat" component carrying
+a domain model is not a shape it knows how to use, however well described.
+
+That settles the primitives-versus-intents question by measurement rather than
+argument, and it explains why `renderForm` worked: as a TOOL, the form schema
+was the thing being filled, so there was no composition decision to get wrong.
+
+### Worth saying plainly
+
+The refusal is GOOD behaviour. The agent said what was missing and why, and
+invented nothing — no placeholder form, no "here is a register form" beside an
+empty screen (F9), no plausible-looking substitute (F22). Of the three failure
+modes seen in this project, this is the only one a person could act on.
+
+### What it means for the architecture
+
+There is no configuration of A2UI's injected tool that renders our design. The
+options are:
+
+1. **Redesign as primitives** — expose `TextField`, `PasswordField`, `Button`
+   etc. as separate components and let the agent compose. Readable, matches
+   every shipping example — and gives up `required`, all-or-nothing validation,
+   and the submit path (F16), because nothing owns the form.
+2. **Go back to our own tool** — `renderForm` renders our components with our
+   validation on both providers. Costs a tool the server must define, so the
+   server knows what a form is again.
+
+There is no third option that keeps both, and the choice is now evidenced rather
+than assumed.
