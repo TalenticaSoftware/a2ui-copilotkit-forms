@@ -1,263 +1,167 @@
 import { z } from 'zod'
-import type { CatalogDefinitions } from '@copilotkit/a2ui-renderer'
 
 /**
- * What a form is, and what this client can draw — one file, because they are
- * one question.
+ * What this client can draw, described for the agent.
  *
- * `definitions.ts` is CopilotKit's own name for this (see their
- * `a2ui-pdf-analyst` example): the platform-agnostic half of a catalog, zod
- * schemas and prose, with the React renderers next door in `renderers.tsx`.
+ * LEAVES, not a container. The previous version published one `Form` component
+ * whose props were a whole form spec, and the agent could not use it: given
+ * A2UI's own primitives alongside it, it composed those and ignored ours (F22);
+ * given ours alone, it refused outright — "the catalog does not include the
+ * necessary input fields (such as text fields, password inputs, or buttons)"
+ * (F23).
  *
- * It used to live outside `src/` as a shared contract, back when the server
- * needed it too. The server no longer imports anything from here — the browser
- * advertises this to the agent at run time, which is A2UI's design — so a
- * top-level `contract/` folder would be claiming a relationship that no longer
- * exists.
+ * A2UI's injected tool composes a TREE of small components. It does not fill one
+ * rich component. Every implementation that works — Second Brain's 53 cards,
+ * shadify's row/column/input, A2UI's own basic catalog — exposes leaves, so
+ * these are leaves.
+ *
+ * The shapes mirror A2UI's own basic catalog — a `TextField`, `checks`, a button
+ * with an `action` — because the agent has seen that vocabulary and composes it
+ * correctly. What changes is who DRAWS them: these render as shadcn. Where the
+ * model's instinct and A2UI's naming disagree, the model wins (see `type`).
  */
 
-/**
- * One declaration, not three. The Second Brain dashboard next door keeps a
- * validator that disagrees with the code it claims to guard — it requires a
- * `label` prop the generator never emits, and nothing noticed because the
- * validator is called only by its own tests. A schema that also produces the
- * types cannot drift from them.
- *
- * Here it produces four things: the TypeScript types, the catalog schema the
- * agent is constrained by, the renderer's lookup keys, and the check that runs
- * when an answer arrives.
- */
-
-/** How this catalog and its component are named on the wire. */
+/** How this catalog is named on the wire. */
 export const CATALOG_ID = 'prompt-to-form/v1'
-export const FORM_COMPONENT = 'Form'
 
 /**
- * Seven kinds, and adding an eighth is a deliberate decision.
+ * Values bind to the data model rather than being literals.
  *
- * Written once, as a const array, so the model's allowed values, the TypeScript
- * union and the renderer's switch all come from the same line. Two lists would
- * be one list and a lie waiting to happen.
- */
-export const FIELD_KINDS = [
-  'text',
-  'email',
-  'password',
-  'textarea',
-  'number',
-  'select',
-  'checkbox',
-] as const
-
-export type FieldKind = (typeof FIELD_KINDS)[number]
-
-/** How each kind reads when we explain the menu to the model. */
-export const KIND_DESCRIPTIONS: Record<FieldKind, string> = {
-  text: 'A short single-line answer — a name, a job title, an address line.',
-  email: 'An email address. Validated as one, so never use plain text for email.',
-  password: 'A secret. Rendered masked, with a show/hide toggle.',
-  textarea: 'A long answer — a message, a description, notes.',
-  number: 'A numeric answer — a quantity, an age, a price.',
-  select: 'One choice from a short fixed list. Must come with its options.',
-  checkbox: 'A single yes/no — accepting terms, opting in.',
-}
-
-/**
- * A field's key. It becomes the property the answer is stored under, so it has
- * to be a plain identifier: no spaces, no dots, nothing that would collide with
- * object plumbing. Rejecting a bad name is cheaper than sanitising one, because
- * sanitising two different names into the same key silently merges two answers.
- */
-const fieldName = z
-  .string()
-  .min(1)
-  .max(60)
-  /**
-   * camelCase OR snake_case, because the model uses both and the difference
-   * does not matter to anything downstream — either is a fine object key.
-   *
-   * It used to demand camelCase. The model returned `remember_me`, the tool's
-   * parameter validation refused the call, `execute` never ran, and the run
-   * ENDED WITHOUT A RESULT — no error event, no RUN_ERROR, just a spinner that
-   * never stops (F19). A constraint that buys nothing is not free: it is a way
-   * to hang.
-   */
-  .regex(/^[a-z][a-zA-Z0-9_]*$/, 'Field names must start with a letter, then letters, digits or _.')
-  .describe('Key for this answer, e.g. firstName or first_name. Unique within the form.')
-
-const optionSchema = z.object({
-  value: z.string().min(1).max(100).describe('Stored value, e.g. "mon".'),
-  label: z.string().min(1).max(100).describe('What the person reads, e.g. "Monday".'),
-})
-
-const fieldBase = {
-  name: fieldName,
-  label: z.string().min(1).max(80).describe('What the person reads above the control.'),
-  /**
-   * Stated, never inferred.
-   *
-   * Portal-Lite marked a field required because it happened to HAVE a
-   * validation rule, which held only while optional fields had none. So there
-   * is no default here: the model must say, and an answer that stays silent is
-   * an answer we reject rather than guess at.
-   */
-  required: z
-    .boolean()
-    .describe('Must this be filled in? State it either way; there is no default.'),
-  placeholder: z.string().max(100).optional().describe('Faint example text inside the control.'),
-  help: z.string().max(200).optional().describe('A short note under the control.'),
-}
-
-/**
- * A field, as a discriminated union rather than one shape with optional extras.
+ * It must be a UNION whose members include `{ path }`. That is not decoration:
+ * A2UI's binder decides which props are data bindings by inspecting the zod
+ * schema — `_def.typeName === 'ZodUnion'` with an option shaped `{ path }` —
+ * and anything else is classified STATIC and passed through unresolved. Written
+ * as a bare object, `value` arrived at the renderer as the binding itself and
+ * every input displayed "[object Object]" (F25).
  *
- * The whole point is that `select` cannot exist without its options. Expressed
- * as an optional `options?` on a single object, a select with none would parse
- * cleanly and render an empty dropdown — the exact failure the plan calls out.
- * As a union it is unrepresentable: no options, no parse.
+ * `{ path: "/email" }` is A2UI's binding form: the binder resolves it to the
+ * current value on the way in, and the component writes back to the same path
+ * on change. That shared model is what lets a submit button read fields it does
+ * not own — the thing our container version had to hand-roll.
  */
-export const fieldSchema = z.discriminatedUnion('kind', [
-  z.object({ ...fieldBase, kind: z.literal('text').describe(KIND_DESCRIPTIONS.text) }),
-  z.object({ ...fieldBase, kind: z.literal('email').describe(KIND_DESCRIPTIONS.email) }),
-  z.object({ ...fieldBase, kind: z.literal('password').describe(KIND_DESCRIPTIONS.password) }),
-  z.object({ ...fieldBase, kind: z.literal('textarea').describe(KIND_DESCRIPTIONS.textarea) }),
-  z.object({ ...fieldBase, kind: z.literal('number').describe(KIND_DESCRIPTIONS.number) }),
-  z.object({ ...fieldBase, kind: z.literal('checkbox').describe(KIND_DESCRIPTIONS.checkbox) }),
-  z.object({
-    ...fieldBase,
-    kind: z.literal('select').describe(KIND_DESCRIPTIONS.select),
-    options: z
-      .array(optionSchema)
-      .min(2, 'A select needs at least two options.')
-      .max(20)
-      .describe('The choices. Real ones drawn from the request, never placeholders.'),
-  }),
-])
-
-export type Field = z.infer<typeof fieldSchema>
-export type SelectField = Extract<Field, { kind: 'select' }>
+const binding = z
+  .union([
+    z.string(),
+    z.object({ path: z.string().describe('JSON pointer into the form data, e.g. "/email".') }),
+  ])
+  .describe('A literal, or a binding to a value in the form data.')
 
 /**
- * A whole form.
+ * Declarative validation, evaluated by A2UI's binder.
  *
- * The upper bound on `fields` is not decoration. "I need a login form" answered
- * with thirty fields is a wrong answer, and a wrong answer that renders looks
- * enough like a right one to ship. Better to refuse it and see why.
+ * The binder watches these and injects `isValid` and `validationErrors` into the
+ * component's props. It is the answer to F16 — constraints were never dropped by
+ * A2UI, the agent simply never expressed them, because nothing in the basic
+ * catalog's descriptions told it to.
  */
-export const formSpecObject = z
-  .object({
-    title: z.string().min(1).max(80).describe('The form\'s heading, e.g. "Create an account".'),
-    description: z.string().max(200).optional().describe('One line under the heading, if it helps.'),
-    submitLabel: z
-      .string()
-      .min(1)
-      .max(40)
-      .describe('What the button says. Name the action: "Create account", not "Submit".'),
-    fields: z
-      .array(fieldSchema)
-      .min(1, 'A form needs at least one field.')
-      .max(20)
-      .describe('Only the fields this form genuinely needs. Do not pad it.'),
-  })
-
-/**
- * The same form, plus the rule JSON Schema cannot express.
- *
- * Split from `formSpecObject` because both A2UI catalog APIs — the client's
- * `createCatalog` and our own `z.toJSONSchema` — need a plain ZodObject, and a
- * refinement wraps it into something neither accepts. The refined version is
- * what actually parses an arriving answer, which is why the duplicate-name rule
- * is still enforced even though it never reaches the wire.
- */
-export const formSpecSchema = formSpecObject
-  .superRefine((spec, ctx) => {
-    /**
-     * Two fields sharing a name means one silently overwrites the other's
-     * answer. zod cannot express this inside the array, so it is checked here —
-     * and checked at all, because the symptom is a missing value at submit
-     * time, long after the cause.
-     */
-    const seen = new Set<string>()
-    for (const [index, field] of spec.fields.entries()) {
-      if (seen.has(field.name)) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['fields', index, 'name'],
-          message: `Duplicate field name "${field.name}".`,
-        })
-      }
-      seen.add(field.name)
-    }
-  })
-
-export type FormSpec = z.infer<typeof formSpecSchema>
-
-/**
- * Parse an answer, and never half-parse one.
- *
- * Returns the spec or the reasons it was refused — deliberately not a spec with
- * the bad fields stripped out. A register form quietly missing its password box
- * is worse than no form, because nothing on screen says anything went wrong.
- */
-export type ParseResult =
-  | { ok: true; spec: FormSpec }
-  | { ok: false; problems: string[] }
-
-export function parseFormSpec(value: unknown): ParseResult {
-  const result = formSpecSchema.safeParse(value)
-  if (result.success) return { ok: true, spec: result.data }
-
-  return {
-    ok: false,
-    problems: result.error.issues.map((issue) => {
-      const where = issue.path.length ? `${issue.path.join('.')}: ` : ''
-      return `${where}${issue.message}`
+const checks = z
+  .array(
+    z.object({
+      condition: z.any().describe('An expression over the form data that must hold.'),
+      message: z.string().describe('What to show the person when it does not.'),
     }),
-  }
-}
+  )
+  .optional()
+  .describe(
+    'Validation rules. ALWAYS add one per required field, e.g. condition that ' +
+      'the bound value is non-empty, with a message naming the field.',
+  )
 
-
-/**
- * What the schema cannot carry, and the agent still needs telling.
- *
- * JSON Schema can say a select needs at least two options. It cannot say "and
- * they must be real ones, not Option 1 and Option 2" — that is a rule about
- * meaning. It lives here rather than in the prompt file because these rules
- * exist to protect the contract's guarantees, and reading them beside the
- * contract is how they stay in step with it.
- */
-export const CATALOG_RULES = [
-  'Use only the field kinds in the catalog. If the request needs something you ' +
-    'cannot express — a date, a file, a signature — say so in words instead of ' +
-    'substituting a text field that pretends to be one.',
-  'Never invent placeholder content. A select must carry real options drawn ' +
-    'from the request; "Option 1, Option 2" is a wrong answer, not a fallback.',
-  'State `required` on every field. It has no default and an omission is refused.',
-  'Prefer the narrowest kind that fits: email over text for an email address, ' +
-    'number over text for a quantity.',
-  'Do not pad. Extra plausible fields nobody asked for are the most common way ' +
-    'to get this wrong.',
-] as const
-
-/**
- * The cast, and why there is one.
- *
- * `@copilotkit/a2ui-renderer` 1.68.1 peer-depends on zod ^3 and resolves its own
- * 3.25.76; this app is on zod 4. The two share a name and not a type, so a zod-4
- * object is rejected as missing `_parse`, `_cached`, `UnknownKeysParam` and a
- * dozen other zod-3 internals. There is no version of this that type-checks
- * honestly — installing zod 3 alongside would mean two zods and two schemas,
- * which is the drift this design exists to prevent (F6).
- *
- * The cast is on the whole object rather than the schema because the target has
- * to be the LIBRARY's ZodObject, and naming zod's type here imports ours — the
- * very type being rejected.
- */
 export const definitions = {
-  [FORM_COMPONENT]: {
+  /**
+   * The container. Named `FormCard` rather than `Form` so it reads as "a card
+   * holding fields" — a layout, not a thing that owns a domain model.
+   */
+  FormCard: {
     description:
-      'A form for a person to fill in. Include only the fields the request ' +
-      'genuinely needs — a login form is an email, a password and nothing else.',
-    props: formSpecObject,
+      'A card that groups form fields, with a heading. Use one per form and put ' +
+      'the fields and the submit button inside it.',
+    props: z.object({
+      title: z.string().describe('The heading, e.g. "Create an account".'),
+      description: z.string().optional().describe('One line under the heading.'),
+      children: z
+        .array(z.string())
+        .describe('Ids of the components inside, in order. Never define them inline.'),
+    }),
   },
-} as unknown as CatalogDefinitions
+
+  TextField: {
+    description:
+      'A labelled text input. Set `type` to the narrowest that fits: text for a ' +
+      'name, email for an email address, password for a secret, number for a ' +
+      'quantity, textarea for a message. Bind `value` to a path in the form ' +
+      'data, and always set `required`.',
+    props: z.object({
+      label: z.string().describe('What the person reads above the input.'),
+      value: binding,
+      /**
+       * Named `type`, not `variant`, because that is what the model writes.
+       *
+       * Declared as `variant` — A2UI's own name — the agent ignored it and sent
+       * `"type": "email"` anyway, so every field rendered as plain text. The
+       * injected tool's schema is `items: { type: "object" }`, which validates
+       * nothing, so a prop name the model does not expect is simply dropped in
+       * silence. Matching its instinct costs nothing and is the difference
+       * between an email input and a text box (F24).
+       */
+      type: z
+        .enum(['text', 'email', 'password', 'number', 'textarea'])
+        .describe('The input type, as in HTML. Choose the narrowest that fits.'),
+      placeholder: z.string().optional().describe('Faint example text inside the input.'),
+      help: z.string().optional().describe('A short note under the input.'),
+      required: z
+        .boolean()
+        .describe('REQUIRED PROPERTY. Whether the person must fill this in. Always set it.'),
+      checks,
+    }),
+  },
+
+  SelectField: {
+    description: 'A labelled dropdown. One choice from a short list of real options.',
+    props: z.object({
+      label: z.string(),
+      value: binding,
+      options: z
+        .array(z.object({ value: z.string(), label: z.string() }))
+        .describe('The choices. Real ones drawn from the request, never placeholders.'),
+      required: z.boolean(),
+      checks,
+    }),
+  },
+
+  CheckboxField: {
+    description: 'A single yes/no — accepting terms, opting in.',
+    props: z.object({
+      label: z.string(),
+      value: binding,
+      required: z.boolean(),
+      checks,
+    }),
+  },
+
+  SubmitButton: {
+    description:
+      'The button that submits the form. Name the action it performs — ' +
+      '"Create account", not "Submit". Its action carries the form data back.',
+    props: z.object({
+      label: z.string(),
+      /**
+       * A UNION containing `{ event }`, because that shape is how the binder
+       * recognises an action and hands the renderer a ready-to-call closure.
+       * Declared as `z.any()` it stays STATIC and the button does nothing.
+       */
+      action: z
+        .union([
+          z.object({
+            event: z.object({
+              name: z.string().describe('What happened, e.g. "form_submitted".'),
+              context: z.any().optional().describe('The values to send back.'),
+            }),
+          }),
+          z.any(),
+        ])
+        .optional()
+        .describe('Optional. Omit it and the whole form is submitted as-is.'),
+    }),
+  },
+} as const

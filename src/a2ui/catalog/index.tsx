@@ -1,35 +1,71 @@
-import { createCatalog } from '@copilotkit/a2ui-renderer'
-import { CATALOG_ID, FORM_COMPONENT, definitions } from './definitions'
-import { FormRenderer } from './renderers'
+import { Catalog, createReactComponent } from '@copilotkit/a2ui-renderer'
+import { z } from 'zod'
+import { CATALOG_ID, definitions } from './definitions'
+import {
+  CheckboxFieldRenderer,
+  FormCardRenderer,
+  SelectFieldRenderer,
+  SubmitButtonRenderer,
+  TextFieldRenderer,
+  type RenderArgs,
+} from './renderers'
 
 /**
- * Definitions plus renderers, as one catalog.
+ * Definitions plus renderers, assembled by hand.
  *
- * `createCatalog` type-checks the two against each other, so a renderer whose
- * props disagree with its schema does not compile. That is the shape contract
- * the Second Brain dashboard never had — its halves agree perfectly on component
- * NAMES and pass everything else as an untyped bag, and the scar is still in its
- * source: a prop commented "accepts both 'label' and 'title' from backend".
+ * `createCatalog` would be the convenience wrapper for this, and we cannot use
+ * it: it wraps each renderer and forwards only `{ props, children, dispatch }`,
+ * dropping the `context` that carries `dataContext.set` — the only way a
+ * component can write a value back. Building on `createReactComponent` directly
+ * costs a few lines and keeps the capability.
+ *
+ * The trade is real and worth stating: `createCatalog` type-checks renderers
+ * against their definitions, and this does not. The reachability test next door
+ * is what replaces that guarantee — it asserts every defined component has a
+ * renderer and vice versa.
  */
 
+type Definition = { description: string; props: z.ZodObject<any> }
+
 /**
- * `includeBasicCatalog` is deliberately OFF, and this is the whole experiment.
+ * One component, as A2UI wants it.
  *
- * With it on — as CopilotKit's example and skill doc suggest — the agent gets
- * A2UI's own Card, TextField and Button alongside our `Form`, and it chose those
- * every time (F22). What renders looks like a form and is not one: the email box
- * is typed `text`, `required` is false on every field, there is no submit
- * button, and none of our components appear. Nothing reports the substitution,
- * because a plausible form is exactly what a wrong answer looks like here.
- *
- * Off, `Form` is the only thing the agent can name. If that brings back shadcn,
- * validation and the submit path, the lesson is that advertising a catalog is
- * not the same as being used, and exclusivity is what makes it stick. If it does
- * NOT, the finding is larger: the agent will not use a custom catalog even when
- * there is no alternative.
+ * `schema` is the zod object from `definitions`, which is what the binder reads
+ * to decide which props are DYNAMIC (bind to the data model), which are ACTIONs,
+ * and which are children — so the shape of the definition is what makes the
+ * binding work, not anything we do here.
  */
-export const catalog = createCatalog(
-  definitions,
-  { [FORM_COMPONENT]: FormRenderer },
-  { catalogId: CATALOG_ID, includeBasicCatalog: false },
+function component(name: string, definition: Definition, render: (args: RenderArgs<any>) => any) {
+  return createReactComponent(
+    {
+      name,
+      schema: definition.props.describe(definition.description) as never,
+    } as never,
+    render as never,
+  )
+}
+
+const renderers = {
+  FormCard: FormCardRenderer,
+  TextField: TextFieldRenderer,
+  SelectField: SelectFieldRenderer,
+  CheckboxField: CheckboxFieldRenderer,
+  SubmitButton: SubmitButtonRenderer,
+} as const
+
+/**
+ * `includeBasicCatalog` has no equivalent here, and that is deliberate: ours are
+ * the only components, so the agent cannot quietly compose A2UI's own widgets
+ * instead (F22). Nothing else is offered, and — unlike the container version it
+ * refused (F23) — what is offered is the leaf vocabulary it expects.
+ */
+export const catalog = new Catalog(
+  CATALOG_ID,
+  Object.entries(renderers).map(([name, render]) =>
+    component(name, definitions[name as keyof typeof definitions] as never, render as never),
+  ),
+  [],
 )
+
+/** Exported for the test that keeps definitions and renderers in step. */
+export const COMPONENT_NAMES = Object.keys(renderers)

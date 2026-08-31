@@ -710,3 +710,86 @@ options are:
 
 There is no third option that keeps both, and the choice is now evidenced rather
 than assumed.
+
+## F24 — Prop names must match the model's instinct, not the library's `[hit]`
+
+Our `TextField` declared `variant: 'shortText' | 'email' | 'obscured' | …`,
+copying A2UI's own naming. The agent ignored it and sent `"type": "email"`.
+
+Nothing complained. The injected tool's schema is `items: { type: "object" }`,
+which validates nothing, so an unrecognised prop name is dropped in silence and
+every field rendered as plain text.
+
+Renaming the prop to `type` with HTML-ish values (`text | email | password |
+number | textarea`) fixed it on the next run. The catalog description is
+guidance, not a constraint — so where the model's instinct and the library's
+vocabulary disagree, the model wins.
+
+## F25 — A2UI's binder reads zod 3 internals, and zod 4 fails silently `[hit]`
+
+The finding that made everything else work, and the sharpest version of F6.
+
+Bindings, actions and validation are not declared by naming a prop — they are
+DETECTED, by the binder inspecting the zod schema:
+
+```js
+current._def.typeName === 'ZodUnion'
+options.some(o => o._def.typeName === 'ZodObject' && o._def.shape().path)
+   → { type: 'DYNAMIC' }
+```
+
+`_def.typeName` is zod 3. On a zod 4 schema:
+
+```
+_def.typeName : undefined
+_def.type     : "union"
+```
+
+Every check returns false, so every prop is classified `STATIC` and passed
+through raw. The symptom was every input showing `[object Object]` — the binding
+object itself, never resolved. `checks` never evaluated, and `action` never
+became the callable closure the binder is documented to produce.
+
+No error, no warning. A cast silenced this at compile time (F6); it could not
+silence it at run time.
+
+Two things follow, and the second is the one to remember:
+
+1. **The app is now on zod 3.25.76**, matching what `@copilotkit/a2ui-renderer`
+   resolves. Not an alias — one zod, because two would be the drift this design
+   exists to prevent.
+2. **Shape matters more than name.** `value` must be a UNION containing
+   `{ path }`, and `action` a union containing `{ event }`. Declared as a bare
+   object or `z.any()`, they are inert. None of this is in CopilotKit's docs or
+   its skill file; it is in web_core's source.
+
+## F26 — It works, end to end `[hit]`
+
+shadcn + CopilotKit + AG-UI + A2UI, all four, on `gemini-3.6-flash`.
+
+"I need a register form" produced a card with Full Name, Email and Password —
+each marked required, the email input typed `email`, the password masked with our
+show/hide toggle, and a "Create account" button. Typed values wrote into A2UI's
+data model and read back. Pressing the button dispatched to the agent, which
+replied:
+
+> "Your registration has been submitted successfully for Jordan Mensah
+> (jordan@example.com)."
+
+The agent had the values. Every layer is load-bearing: CopilotKit for the chat
+and runtime, AG-UI for streaming, A2UI's injected tool and catalog negotiation
+for composition and data binding, shadcn for every pixel.
+
+The server imports nothing about forms — `grep -c definitions server/*.ts` is 0
+for every file. The catalog lives in the browser and is advertised at run time,
+so the two halves can be separate repositories with no shared contract.
+
+### What made it work, in order of how long it cost
+
+1. Leaves, not one rich component (F23)
+2. Prop names the model expects (F24)
+3. zod 3, and union shapes the binder can detect (F25)
+
+None of the three is documented. All three were found by reading
+`@a2ui/web_core`'s source, which ships uncompiled — the single most useful thing
+in the whole dependency tree.
