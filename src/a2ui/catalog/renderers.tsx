@@ -3,7 +3,9 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import type { RendererProps } from '@copilotkit/a2ui-renderer'
 import type { Field, FormSpec } from '@contract/form-spec'
+import { parseFormSpec } from '@contract/form-spec'
 import { emptyValueFor, rendererFor, type FieldValue, type FormValues } from './fields'
 
 /**
@@ -82,17 +84,61 @@ function errorsFor(fields: Field[], values: FormValues): Record<string, string> 
   return errors
 }
 
-export type FormRendererProps = {
-  spec: FormSpec
-  /** Given the answers when the person submits a form that passes validation. */
-  onSubmit: (values: FormValues) => void
-}
+/**
+ * The A2UI renderer for our `Form` component.
+ *
+ * Takes `RendererProps` — `props` resolved from the surface, and `dispatch` for
+ * sending an action back. It is not given an `onSubmit` by the app: where a
+ * completed form goes is not the browser's decision to make.
+ */
+type FormRendererComponentProps = RendererProps<unknown>
 
 function initialValues(fields: Field[]): FormValues {
   return Object.fromEntries(fields.map((field) => [field.name, emptyValueFor(field)]))
 }
 
-export function FormRenderer({ spec, onSubmit }: FormRendererProps) {
+export function FormRenderer({ props, dispatch }: FormRendererComponentProps) {
+  /**
+   * Checked here even though the agent was constrained by the same schema.
+   *
+   * The duplicate-field-name rule is a zod refinement that cannot survive
+   * translation to JSON Schema, so nothing upstream has ever enforced it — and a
+   * surface can reach this renderer from a path that did not validate at all.
+   * This is the renderer refusing malformed input, the way it would refuse a bad
+   * prop; it is not the app's business rules living in the browser.
+   */
+  const parsed = parseFormSpec(props)
+
+  if (!parsed.ok) {
+    return (
+      <div className="border-destructive/40 bg-destructive/5 flex flex-col gap-2 rounded-lg border p-4">
+        <p className="text-destructive text-sm font-medium">This form can't be drawn.</p>
+        <ul className="text-muted-foreground flex list-disc flex-col gap-1 pl-5 text-xs">
+          {parsed.problems.map((problem) => (
+            <li key={problem}>{problem}</li>
+          ))}
+        </ul>
+      </div>
+    )
+  }
+
+  return <Form spec={parsed.spec} dispatch={dispatch} />
+}
+
+/**
+ * The form itself, once the recipe is known good.
+ *
+ * Split out so the hooks below never run against an unparsed spec — a component
+ * that returns early before its own useState is a Rules-of-Hooks violation, and
+ * the error it produces points nowhere useful.
+ */
+function Form({
+  spec,
+  dispatch,
+}: {
+  spec: FormSpec
+  dispatch: FormRendererComponentProps['dispatch']
+}) {
   const [values, setValues] = useState<FormValues>(() => initialValues(spec.fields))
   /**
    * Errors appear on submit, not on the first keystroke.
@@ -102,6 +148,7 @@ export function FormRenderer({ spec, onSubmit }: FormRendererProps) {
    * arguing with them.
    */
   const [submitted, setSubmitted] = useState(false)
+  const [sent, setSent] = useState(false)
 
   const errors = errorsFor(spec.fields, values)
   const showing = submitted ? errors : {}
@@ -109,7 +156,22 @@ export function FormRenderer({ spec, onSubmit }: FormRendererProps) {
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault()
     setSubmitted(true)
-    if (Object.keys(errors).length === 0) onSubmit(values)
+    if (Object.keys(errors).length > 0) return
+
+    /**
+     * The answers go to the AGENT, not into browser state.
+     *
+     * A2UI actions forward to the agent by default, which is what makes this a
+     * form rather than a picture of one — and it puts the decision about what a
+     * submission MEANS on the side that owns decisions. The client-side
+     * validation above is an affordance: it stops an obviously bad submit
+     * travelling, and it is not the control.
+     */
+    dispatch?.({
+      name: 'form_submitted',
+      context: { title: spec.title, values },
+    })
+    setSent(true)
   }
 
   return (
@@ -180,8 +242,8 @@ export function FormRenderer({ spec, onSubmit }: FormRendererProps) {
             )
           })}
 
-          <Button type="submit" className="self-start">
-            {spec.submitLabel}
+          <Button type="submit" className="self-start" disabled={sent}>
+            {sent ? 'Sent' : spec.submitLabel}
           </Button>
         </form>
       </CardContent>

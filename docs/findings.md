@@ -475,3 +475,51 @@ form" case worth refusing. It is to distinguish "not finished yet" from
 | **Our tool** + our catalog | ✅ | ✅ |
 
 Only the bottom row works on both providers, and only it is deterministic.
+
+## F19 — An over-strict contract field hangs the run, silently `[hit]`
+
+Our own bug, and the most instructive one yet.
+
+`fieldName` required camelCase: `^[a-z][a-zA-Z0-9]*$`. Asked for a login form,
+the model returned `"name": "remember_me"`. The tool's parameter validation
+refused the call, `execute` never ran — and the stream ended:
+
+```
+RUN_STARTED · TOOL_CALL_START · TOOL_CALL_ARGS · TOOL_CALL_END
+```
+
+No `TOOL_CALL_RESULT`. No `RUN_ERROR`. No `RUN_FINISHED`. The spinner never
+stops and nothing anywhere says why.
+
+Two lessons, and the second is the bigger one:
+
+A constraint that buys nothing is not free. camelCase versus snake_case makes no
+difference to anything downstream — both are fine object keys — and the rule
+existed only because it looked tidy. Relaxed to `^[a-z][a-zA-Z0-9_]*$`.
+
+And a rejected tool call is indistinguishable from a hang. The framework has no
+event for "the tool refused its arguments", so any schema an agent can fail to
+satisfy is a way to stall the run with no diagnosis. Anything strict in a tool
+schema needs to be there for a reason you can name.
+
+## F20 — A rate limit is a spinner `[hit]`
+
+Final verification was blocked by Gemini's free-tier quota. The browser console
+carried it plainly:
+
+```
+[CopilotKit] Error (agent_run_error_event): Failed after 3 attempts.
+Last error: You exceeded ... gemini-3.6-flash. Please retry in 47.8s
+```
+
+The screen showed a loading dot. No message, no retry affordance, no countdown —
+and the information had already reached the client.
+
+This is F2's third distinct trigger: a bad key, a failed generation, and now a
+rate limit all present identically to a person. Worth stating as a single
+conclusion rather than three findings: **CopilotKit surfaces run failures to the
+console and not to the UI, and a host app has to render them itself.**
+
+It also explains earlier "hangs" in this session that we attributed to the
+agent. Two identical requests, minutes apart, produced a stall and then a clean
+`RUN_FINISHED` — the difference was quota, not code.

@@ -64,8 +64,18 @@ const fieldName = z
   .string()
   .min(1)
   .max(60)
-  .regex(/^[a-z][a-zA-Z0-9]*$/, 'Field names must be camelCase, starting with a letter.')
-  .describe('camelCase key for this answer, e.g. firstName. Unique within the form.')
+  /**
+   * camelCase OR snake_case, because the model uses both and the difference
+   * does not matter to anything downstream — either is a fine object key.
+   *
+   * It used to demand camelCase. The model returned `remember_me`, the tool's
+   * parameter validation refused the call, `execute` never ran, and the run
+   * ENDED WITHOUT A RESULT — no error event, no RUN_ERROR, just a spinner that
+   * never stops (F19). A constraint that buys nothing is not free: it is a way
+   * to hang.
+   */
+  .regex(/^[a-z][a-zA-Z0-9_]*$/, 'Field names must start with a letter, then letters, digits or _.')
+  .describe('Key for this answer, e.g. firstName or first_name. Unique within the form.')
 
 const optionSchema = z.object({
   value: z.string().min(1).max(100).describe('Stored value, e.g. "mon".'),
