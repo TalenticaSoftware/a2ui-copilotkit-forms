@@ -606,3 +606,54 @@ pnpm dev:server && pnpm dev     # then ask for a login form
 
 If it fails, `git revert` restores `formTool.ts` and the mode switch, and the
 "own" path was working as of commit ca8dda1.
+
+## F22 (settled) — Pure A2UI renders, and the agent ignored our catalog `[hit]`
+
+It works, and the result is not what we wanted.
+
+`formTool.ts` deleted, `injectA2UITool: true`, our catalog advertised through the
+provider, `includeBasicCatalog: true`. Asked for a login form on
+`gemini-3.6-flash`. After roughly two minutes a form appeared:
+
+```
+Log In
+Email
+Password
+[ Log In ]
+```
+
+But it is drawn with A2UI's OWN components, not ours. Read from the DOM:
+
+| | |
+|---|---|
+| Email input type | `text` — not `email` |
+| `required` | `false` on both, though a login form needs both |
+| Password show/hide toggle | absent |
+| Required marks | absent |
+| Submit button | A2UI's blue default, not our shadcn button |
+
+**The agent had our `Form` component available and chose not to use it.**
+`includeBasicCatalog: true` offers `Card`, `TextField` and `Button` alongside
+ours, and composing three small primitives is evidently an easier path than
+filling one component with a nested `fields` array.
+
+So advertising a custom catalog does not mean it gets used. Nothing forces the
+choice, nothing reports that it was skipped, and the failure is invisible: what
+appears is a plausible form, so only a DOM inspection reveals that the design
+system and every constraint were dropped on the way (F16, now reproduced through
+our own catalog rather than the basic one).
+
+### What this settles
+
+- **Pure A2UI works.** The architecture is sound: the server knows nothing about
+  forms, the browser advertises what it can draw, and a form appears.
+- **It does not preserve our components.** Not reliably, and not without a way
+  to make the agent prefer them.
+
+Two things left untried, in order of promise: dropping
+`includeBasicCatalog` so ours is the only option, and naming the component in
+the prompt. Both are cheap; neither is guaranteed, because the choice is the
+model's.
+
+The custom tool did not have this problem — `renderForm` was the only tool, so
+"use our component" was not a decision the agent could get wrong.
