@@ -439,7 +439,14 @@ and it rendered as our shadcn form — required marks, password toggle and all.
 **A2UI's documented path, with our design system.** That is the middle row of the
 grid, and it works.
 
-## F18 — A2UI paints partial frames, and a strict validator rejects them `[hit]`
+## F18 — WITHDRAWN. A2UI does NOT paint partial frames `[hit]`
+
+**Superseded by F21.** The observation below was real; the explanation was wrong,
+and it was wrong in the direction that would have cost us the simpler
+architecture. Left in place because a retracted finding is worth more than a
+quietly deleted one.
+
+## F18 (original, incorrect) — A2UI paints partial frames `[reasoned, disproven]`
 
 Non-deterministic, which is what makes it dangerous.
 
@@ -523,3 +530,49 @@ console and not to the UI, and a host app has to render them itself.**
 It also explains earlier "hangs" in this session that we attributed to the
 agent. Two identical requests, minutes apart, produced a stall and then a clean
 `RUN_FINISHED` — the difference was quota, not code.
+
+
+## F21 — F18 was wrong: the middleware only paints complete components `[hit]`
+
+Spent an hour on the question "can the renderer tell 'still streaming' from
+'broken'?" The answer turned out to be that it does not need to.
+
+**There is no signal.** `RendererProps` carries `props`, `children` and
+`dispatch`. `Surface` is typed `any`. `useA2UI()` exposes `version` — a change
+counter — and nothing about completeness. A renderer genuinely cannot ask
+whether more is coming.
+
+**But the middleware never hands it an incomplete component.**
+`updateComponents` is emitted only once `extractCompleteItemsWithStatus` reports
+the components array CLOSED. That function is exported, so the assumption is
+testable rather than inferred — `streaming.test.ts` walks every plausible
+intermediate state of a realistic tool-argument stream and asserts none yields a
+component our contract would reject. It passes across ~30 prefixes, including
+the interesting one: a nested `fields` array closes long before `components`
+does, and its `]` is NOT mistaken for the outer close.
+
+So what caused the failure cards we saw?
+
+Two things, neither of them streaming:
+
+1. **F19** — our own camelCase rule, refusing `remember_me`. Now relaxed.
+2. **F10's mis-wiring.** The very first failure showed `name` missing from every
+   field while the wire carried it on all of them — a stripped prop, not a
+   truncated one. That run had the catalog registered through
+   `createA2UIMessageRenderer` instead of the provider. Leading explanation, and
+   the only one consistent with all three fields losing the same key.
+
+`[reasoned]` on the second point: confirming it needs a live run, and Gemini's
+free-tier quota is exhausted.
+
+### Why this matters more than the finding itself
+
+If partial frames were real, our own tool would be the only way to render
+reliably, and the contract would have to be shared across two repos.
+
+They are not real. Which means A2UI's own injected tool is viable on Gemini, the
+frontend can own the catalog alone and advertise it at runtime, and the
+cross-repo contract problem does not need solving — it disappears.
+
+I argued the opposite an hour ago on the strength of F18. The test is why the
+correction is trustworthy and the original claim was not.
