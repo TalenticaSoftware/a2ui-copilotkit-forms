@@ -6,7 +6,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import type { RendererProps } from '@copilotkit/a2ui-renderer'
 import type { Field, FormSpec } from './definitions'
 import { parseFormSpec } from './definitions'
-import { emptyValueFor, rendererFor, type FieldValue, type FormValues } from './fields'
+import { emptyValueFor, rendererFor, type FieldValue, type FormValues } from '@/components/form-fields'
 
 /**
  * Draws a form from a recipe.

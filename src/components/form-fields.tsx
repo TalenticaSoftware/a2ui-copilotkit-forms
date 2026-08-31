@@ -11,10 +11,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import type { Field, FieldKind, SelectField } from './definitions'
+import type { Field, FieldKind, SelectField } from '@/a2ui/catalog/definitions'
 
 /**
- * The catalog: one field kind, one component.
+ * The form inputs, one per field kind.
+ *
+ * Ordinary app components that happen to be what the A2UI catalog draws with —
+ * a password box with a show/hide toggle is not agent-specific, and filing it
+ * under a2ui/ would imply it only exists for the agent. CopilotKit's
+ * reskinnable-demo does the same: its catalog imports `StatusPill` from the
+ * app's own components/ folder rather than defining it inline.
  *
  * This is the half of the Second Brain dashboard that actually worked — 53
  * component names, in sync on both sides, no drift. What it did not do is share
@@ -142,7 +148,7 @@ function CheckboxRenderer({ field, value, onChange, id }: FieldRendererProps) {
  * Brain has 25 of its 53 components unreachable from the running code while
  * staying registered and tested at both ends — nothing there could fail.
  */
-export const catalog: Record<FieldKind, FieldRenderer> = {
+export const fieldRenderers: Record<FieldKind, FieldRenderer> = {
   text: textLike('text'),
   email: textLike('email'),
   number: textLike('number'),
@@ -170,7 +176,7 @@ export const catalog: Record<FieldKind, FieldRenderer> = {
  * the kind we do not have — not a blank space, and not a crash.
  */
 export function rendererFor(kind: string): FieldRenderer | undefined {
-  return catalog[kind as FieldKind]
+  return fieldRenderers[kind as FieldKind]
 }
 
 /** The value a field starts at, by kind. */

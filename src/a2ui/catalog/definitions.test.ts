@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { FIELD_KINDS, KIND_DESCRIPTIONS, parseFormSpec, type FormSpec } from './definitions'
-import { catalog } from './fields'
+import { fieldRenderers } from '@/components/form-fields'
 
 /**
  * Does our renderer honour the contract?
@@ -31,7 +31,7 @@ describe('every declared kind can be drawn', () => {
    * error; this catches the reverse — a renderer for a kind nobody declared.
    */
   test('the renderer covers FIELD_KINDS exactly', () => {
-    expect(Object.keys(catalog).sort()).toEqual([...FIELD_KINDS].sort())
+    expect(Object.keys(fieldRenderers).sort()).toEqual([...FIELD_KINDS].sort())
   })
 
   test('every kind is described for the agent', () => {
