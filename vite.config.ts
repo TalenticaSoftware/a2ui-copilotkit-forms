@@ -8,11 +8,7 @@ export default defineConfig({
   resolve: {
     // `import.meta.dirname`, not `__dirname`: Vite's native config loader does
     // not support the CJS global and warns that it is going away.
-    alias: {
-      "@": path.resolve(import.meta.dirname, "./src"),
-      // The shared contract sits OUTSIDE src, so neither half imports the other.
-      "@contract": path.resolve(import.meta.dirname, "./contract"),
-    },
+    alias: { "@": path.resolve(import.meta.dirname, "./src") },
     /*
       One React, not several.
       pnpm gives @copilotkit/a2ui-renderer its own resolution for React, and two

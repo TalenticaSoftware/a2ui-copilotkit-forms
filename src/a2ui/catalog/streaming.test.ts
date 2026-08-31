@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { extractCompleteItemsWithStatus } from '@ag-ui/a2ui-middleware'
-import { parseFormSpec } from '@contract/form-spec'
+import { parseFormSpec } from './definitions'
 
 /**
  * Can a half-built component reach our renderer?

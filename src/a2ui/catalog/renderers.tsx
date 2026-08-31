@@ -4,8 +4,8 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import type { RendererProps } from '@copilotkit/a2ui-renderer'
-import type { Field, FormSpec } from '@contract/form-spec'
-import { parseFormSpec } from '@contract/form-spec'
+import type { Field, FormSpec } from './definitions'
+import { parseFormSpec } from './definitions'
 import { emptyValueFor, rendererFor, type FieldValue, type FormValues } from './fields'
 
 /**

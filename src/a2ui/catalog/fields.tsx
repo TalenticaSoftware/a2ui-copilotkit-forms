@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import type { Field, FieldKind, SelectField } from '@contract/form-spec'
+import type { Field, FieldKind, SelectField } from './definitions'
 
 /**
  * The catalog: one field kind, one component.

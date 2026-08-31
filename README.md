@@ -28,9 +28,15 @@ you type  ->  CopilotKit  ->  agent  ->  render_a2ui  ->  middleware validates
           shadcn/ui form  <-  our catalog  <-  AG-UI streams it
 ```
 
-`src/lib/form-spec.ts` is the single declaration underneath all of it. The zod
-schema there produces the TypeScript types, the JSON Schema catalogue the agent
-is constrained by, and the check that runs when its answer arrives.
+`src/a2ui/catalog/definitions.ts` is the single declaration underneath all of
+it. The zod schema there produces the TypeScript types, the catalog schema the
+agent is constrained by, the renderer's lookup keys, and the check that runs
+when an answer arrives.
+
+It lives in the frontend because that is the only side that can own it: a
+renderer is code, and the browser advertises this catalog to the agent on every
+run. The server imports nothing from it — `grep -c definitions server/*.ts`
+returns zero.
 
 ## Field kinds
 

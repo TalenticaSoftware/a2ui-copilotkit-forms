@@ -1,6 +1,5 @@
 import { createCatalog } from '@copilotkit/a2ui-renderer'
-import { CATALOG_ID, FORM_COMPONENT } from '@contract/form-spec'
-import { definitions } from './definitions'
+import { CATALOG_ID, FORM_COMPONENT, definitions } from './definitions'
 import { FormRenderer } from './renderers'
 
 /**

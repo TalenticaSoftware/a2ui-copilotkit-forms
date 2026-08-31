@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { FIELD_KINDS, KIND_DESCRIPTIONS, parseFormSpec, type FormSpec } from '@contract/form-spec'
+import { FIELD_KINDS, KIND_DESCRIPTIONS, parseFormSpec, type FormSpec } from './definitions'
 import { catalog } from './fields'
 
 /**

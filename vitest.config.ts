@@ -7,9 +7,6 @@ import { defineConfig } from 'vitest/config'
  */
 export default defineConfig({
   resolve: {
-    alias: {
-      '@': path.resolve(import.meta.dirname, './src'),
-      '@contract': path.resolve(import.meta.dirname, './contract'),
-    },
+    alias: { '@': path.resolve(import.meta.dirname, './src') },
   },
 })
