@@ -576,3 +576,33 @@ cross-repo contract problem does not need solving — it disappears.
 
 I argued the opposite an hour ago on the strength of F18. The test is why the
 correction is trustworthy and the original claim was not.
+
+## F22 — Pure A2UI: the server ends up knowing nothing about forms `[hit, unverified live]`
+
+Acting on F21. `formTool.ts` deleted, `injectA2UITool: true`, no custom tool, no
+`a2uiToolNames`, no mode switch.
+
+`grep -c contract server/*.ts` now returns 0 for every file. The server holds an
+API key, a runtime and a generic prompt; the browser owns the component catalog
+and advertises it — with its schemas — on every run. That is A2UI's design, and
+it means the contract lives in one repository rather than two.
+
+Verified without the model: typecheck clean across three projects, 12 tests
+pass, lint clean, the server boots, and `/info` still reports
+`"a2uiEnabled": true`.
+
+**NOT verified live.** Gemini's free-tier quota moved from a per-minute limit
+("retry in 22s") to the daily cap ("You exceeded your current quota, check your
+plan and billing details"), which does not reset for hours. So the claim that
+this renders a form is a design claim, not a result — the same distinction F8
+was recorded for, and worth keeping honest about after F18 turned out to be
+wrong.
+
+To settle it, when quota returns:
+
+```
+pnpm dev:server && pnpm dev     # then ask for a login form
+```
+
+If it fails, `git revert` restores `formTool.ts` and the mode switch, and the
+"own" path was working as of commit ca8dda1.

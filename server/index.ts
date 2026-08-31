@@ -4,7 +4,6 @@ import cors from 'cors'
 import { BuiltInAgent, CopilotRuntime } from '@copilotkit/runtime/v2'
 import { createCopilotExpressHandler } from '@copilotkit/runtime/v2/express'
 import { SYSTEM_PROMPT } from './prompt'
-import { renderFormTool } from './formTool'
 
 /**
  * The server: a CopilotKit runtime with A2UI switched on, and nothing else.
@@ -80,46 +79,19 @@ if (!keyVariable) {
 const canonical = accepted[accepted.length - 1]!
 if (!process.env[canonical]) process.env[canonical] = process.env[keyVariable]
 
-/**
- * The whole experiment, as one variable.
- *
- * "own" (default) — our `renderForm` tool and our shadcn components. Works with
- * OpenAI, at the cost of a rendering layer we maintain.
- *
- * "a2ui" — A2UI exactly as documented: it injects its own render tool, the
- * agent composes from A2UI's own components, and A2UI's renderer draws them. If
- * this works, most of src/lib is unnecessary.
- *
- * It failed on OpenAI (F12) because the injected tool declares its components
- * as an object with no properties, and strict tool calling then admits only
- * `{}`. Whether a provider that does not enforce strict schemas — Gemini —
- * behaves differently is the open question, and this switch is how it gets
- * asked without editing code.
- *
- * VITE_RENDER_MODE must match on the client.
- */
-const RENDER_MODE = process.env.RENDER_MODE === 'a2ui' ? 'a2ui' : 'own'
 
 /**
  * `maxSteps` must exceed 1.
  *
- * The default is 1, which is one model call and no more. A2UI works by INJECTING
- * a tool the agent then has to call, so a single step lets the agent request the
- * render and never continue past it. This is the sort of default that produces
- * a chat that answers in prose and never paints anything, with no error to
- * explain why.
+ * The default is 1: one model call and no more. A2UI works by INJECTING a tool
+ * the agent must then call, so a single step lets it request the render and
+ * never continue past it — a chat that answers in prose and paints nothing,
+ * with no error to explain why.
  */
 const agent = new BuiltInAgent({
   model: MODEL,
   prompt: SYSTEM_PROMPT,
   maxSteps: 6,
-  /**
-   * Our tool, not the injected one. See server/formTool.ts for why.
-   *
-   * Its parameters are the real form schema, so the model fills a shape with
-   * actual fields rather than the propertyless object A2UI's own tool declares.
-   */
-  tools: RENDER_MODE === 'own' ? [renderFormTool] : [],
 })
 
 
@@ -142,9 +114,14 @@ const runtime = new CopilotRuntime({
      * form schema — and return `a2ui_operations` from it, which is the
      * middleware's other painting path.
      */
-    injectA2UITool: RENDER_MODE === 'a2ui',
-    /** In "own" mode, treat our tool's result as A2UI output. */
-    ...(RENDER_MODE === 'own' ? { a2uiToolNames: ['renderForm'] } : {}),
+    /**
+     * Without this the middleware injects nothing: A2UI reports itself enabled,
+     * `/info` says `a2uiEnabled: true`, and the agent — with no way to draw —
+     * answers in prose while claiming "here is a register form" (F9). It has no
+     * default; the runtime only supplies one when the CLIENT advertises a
+     * catalog, so a server-configured setup leaves it undefined.
+     */
+    injectA2UITool: true,
     /**
      * Verbose recovery detail is a development choice, and should not survive
      * to anything public. The point of this app is to see what happens when the
@@ -164,10 +141,8 @@ app.get('/health', (_request, response) => {
     ok: true,
     model: MODEL,
     keyVariable,
-    renderMode: RENDER_MODE,
-    // Named so a mis-wired client shows up as a wrong tool list rather than as
-    // an empty chat with no explanation.
-    tool: RENDER_MODE === 'own' ? 'renderForm (ours)' : 'render_a2ui (injected)',
+    // The server knows nothing about forms. The catalog lives in the browser.
+    a2ui: 'injected tool; catalog advertised by the client',
   })
 })
 
@@ -181,10 +156,5 @@ app.use(
 app.listen(PORT, () => {
   console.log(`[server] listening on http://localhost:${PORT}`)
   console.log(`[server] copilotkit at /api/copilotkit · model ${MODEL}`)
-  console.log(
-    `[server] render mode: ${RENDER_MODE}` +
-      (RENDER_MODE === 'own'
-        ? ' — our renderForm tool, our components'
-        : ' — A2UI as documented: injected tool, A2UI components'),
-  )
+  console.log('[server] a2ui: injected tool; the client advertises the catalog')
 })
