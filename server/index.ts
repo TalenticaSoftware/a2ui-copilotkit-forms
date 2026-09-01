@@ -4,13 +4,15 @@ import cors from 'cors'
 import { BuiltInAgent, CopilotRuntime } from '@copilotkit/runtime/v2'
 import { createCopilotExpressHandler } from '@copilotkit/runtime/v2/express'
 import { SYSTEM_PROMPT } from './prompt'
+import { API_URL, tools } from './tools'
 
 /**
  * The server: a CopilotKit runtime with A2UI switched on, and nothing else.
  *
- * Deliberately small. It holds the API key, runs the agent, and publishes the
- * catalog — no database, no accounts, no persistence. A submitted form goes
- * nowhere.
+ * Deliberately small. It holds the API key and runs the agent — no database, no
+ * accounts, no persistence. The records live behind the backend on another
+ * port, which this reaches over HTTP like any other client, and the components
+ * live in the browser, which advertises them itself.
  */
 
 const PORT = Number(process.env.PORT ?? 4100)
@@ -91,7 +93,14 @@ if (!process.env[canonical]) process.env[canonical] = process.env[keyVariable]
 const agent = new BuiltInAgent({
   model: MODEL,
   prompt: SYSTEM_PROMPT,
-  maxSteps: 6,
+  /**
+   * Raised from 6 because discovery now costs steps of its own: list the
+   * resources, describe one, then render. Three calls before a single component
+   * exists, and running out mid-way looks exactly like the failure above — a
+   * reply with no form in it.
+   */
+  maxSteps: 10,
+  tools,
 })
 
 
@@ -127,6 +136,10 @@ app.get('/health', (_request, response) => {
     keyVariable,
     // The server knows nothing about forms. The catalog lives in the browser.
     a2ui: 'injected tool; catalog advertised by the client',
+    // Named here because a runtime pointed at a backend that is not running
+    // fails as a chat that answers vaguely, which is hard to tell from a bad
+    // prompt. Curl this before blaming the model.
+    api: API_URL,
   })
 })
 
@@ -141,4 +154,5 @@ app.listen(PORT, () => {
   console.log(`[server] listening on http://localhost:${PORT}`)
   console.log(`[server] copilotkit at /api/copilotkit · model ${MODEL}`)
   console.log('[server] a2ui: injected tool; the client advertises the catalog')
+  console.log(`[server] api at ${API_URL} — the agent discovers its schemas over HTTP`)
 })
