@@ -30,6 +30,21 @@ const app = express()
 app.use(cors())
 app.use(express.json())
 
+/**
+ * Every request, one line.
+ *
+ * Not decoration. The claim this project makes is that the agent DISCOVERS the
+ * schema rather than being told it, and the only way to see that from outside
+ * is a log line saying the schema was fetched, mid-run, before any form
+ * appeared. Without it the two are indistinguishable.
+ */
+app.use((request, response, next) => {
+  response.on('finish', () =>
+    console.log(`[api] ${request.method} ${request.originalUrl} → ${response.statusCode}`),
+  )
+  next()
+})
+
 /** What resources exist. The agent starts here, knowing no names in advance. */
 app.get('/api/schema', (_request, response) => {
   response.json({ data: { resources: Object.keys(DESCRIBERS) } })

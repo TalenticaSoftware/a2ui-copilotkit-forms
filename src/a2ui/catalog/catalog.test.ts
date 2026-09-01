@@ -40,6 +40,20 @@ describe('the catalog matches its definitions', () => {
     }
   })
 
+  /**
+   * The button names an operation, and never a route.
+   *
+   * If a `url` or `path` prop ever appears here, the agent is transcribing an
+   * endpoint — and a form that posts confidently to a plausible wrong one is a
+   * worse failure than a form that refuses.
+   */
+  test('the submit button asks for a resource and an operation, not a URL', () => {
+    const shape = definitions.SubmitButton.props.shape as Record<string, any>
+    expect(Object.keys(shape.submit.unwrap().shape).sort()).toEqual(['operation', 'resource'])
+    expect(Object.keys(shape)).not.toContain('url')
+    expect(Object.keys(shape)).not.toContain('path')
+  })
+
   test('the container takes children by id, never inline', () => {
     const description = String(definitions.FormCard.props.shape.children.description)
     expect(description.toLowerCase()).toContain('inline')

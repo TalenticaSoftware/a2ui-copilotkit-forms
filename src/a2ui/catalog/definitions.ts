@@ -146,6 +146,25 @@ export const definitions = {
     props: z.object({
       label: z.string(),
       /**
+       * WHICH operation, never WHERE it lives.
+       *
+       * The browser looks these two names up in the descriptor it fetched
+       * itself, and posts to the route the API named. Handing the agent a URL
+       * prop instead would let it write a plausible wrong one — and a form that
+       * posts confidently into nowhere is a worse failure than one that refuses.
+       *
+       * A plain object, not a union with `{ path }`: that shape is how the
+       * binder detects a data binding (F25), and these are literals the agent
+       * copies out of the descriptor, not values a person edits.
+       */
+      submit: z
+        .object({
+          resource: z.string().describe('The resource name, as returned by list_resources.'),
+          operation: z.string().describe('The operation key from the descriptor, e.g. "create".'),
+        })
+        .optional()
+        .describe('Which API operation this button performs. Omit for a form that saves nothing.'),
+      /**
        * A UNION containing `{ event }`, because that shape is how the binder
        * recognises an action and hands the renderer a ready-to-call closure.
        * Declared as `z.any()` it stays STATIC and the button does nothing.

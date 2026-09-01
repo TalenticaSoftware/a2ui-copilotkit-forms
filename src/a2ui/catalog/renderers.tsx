@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { EyeIcon, EyeOffIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { submit, type SubmitResult } from '@/lib/api'
 
 /**
  * shadcn, drawn from A2UI component nodes.
@@ -40,6 +41,10 @@ type A2UIContext = {
   dataContext: {
     set: (path: string, value: unknown) => void
     dataModel?: { get?: (path: string) => unknown }
+    subscribeDynamicValue?: (
+      value: { path: string },
+      onChange: (next: unknown) => void,
+    ) => { unsubscribe: () => void }
   }
   componentModel: { properties: Record<string, any> }
   dispatchAction: (action: unknown) => Promise<void> | void
@@ -70,6 +75,47 @@ function errorOf(props: Record<string, any>): string | null {
   const errors = props.validationErrors
   if (Array.isArray(errors) && errors.length > 0) return String(errors[0])
   return null
+}
+
+/**
+ * Where a rejection from the server is kept: `/email` fails, `/_errors/email`
+ * says why.
+ *
+ * The submit button is the component that hears the API, and the input is the
+ * component that has to show it — they are siblings with no props between them.
+ * The data model is the only thing they share, so it carries the message, the
+ * same way it carries the answers.
+ *
+ * Underscored because the model is also the POST body, and `submit` strips this
+ * key before sending. A field literally called `_errors` would collide; nothing
+ * stops that, and nothing needs to yet.
+ */
+const ERRORS = '/_errors'
+
+/**
+ * The server's complaint about one field, kept current.
+ *
+ * Subscribed rather than read, because a plain `get` is a snapshot: the value
+ * arrives AFTER the person presses submit, and an input that read it at render
+ * time would go on looking fine. `subscribeDynamicValue` is the same mechanism
+ * the binder uses for bound values, so this re-renders for exactly the reason
+ * a typed character does.
+ *
+ * Callers must invoke this unconditionally and choose afterwards. Written as
+ * `errorOf(props) ?? useServerError(...)` it is a conditional hook, skipped
+ * whenever a local check already failed.
+ */
+function useServerError(context: A2UIContext, path: string | null): string | null {
+  const [message, setMessage] = useState<string | null>(null)
+  const subscribe = context.dataContext.subscribeDynamicValue
+  useEffect(() => {
+    if (!path || !subscribe) return
+    const subscription = subscribe.call(context.dataContext, { path: `${ERRORS}${path}` }, (next) =>
+      setMessage(typeof next === 'string' && next ? next : null),
+    )
+    return () => subscription.unsubscribe()
+  }, [context.dataContext, subscribe, path])
+  return message
 }
 
 function Field({
@@ -132,7 +178,8 @@ export function TextFieldRenderer({ props, context }: RenderArgs<any>) {
   const [revealed, setRevealed] = useState(false)
   const path = pathOf(context)
   const id = `a2ui-${path ?? props.label}`
-  const error = errorOf(props)
+  const serverError = useServerError(context, path)
+  const error = errorOf(props) ?? serverError
   const write = (value: string) => path && context.dataContext.set(path, value)
 
   if (props.type === 'textarea') {
@@ -186,7 +233,8 @@ export function TextFieldRenderer({ props, context }: RenderArgs<any>) {
 export function SelectFieldRenderer({ props, context }: RenderArgs<any>) {
   const path = pathOf(context)
   const id = `a2ui-${path ?? props.label}`
-  const error = errorOf(props)
+  const serverError = useServerError(context, path)
+  const error = errorOf(props) ?? serverError
   const options: Array<{ value: string; label: string }> = props.options ?? []
 
   return (
@@ -218,7 +266,8 @@ export function SelectFieldRenderer({ props, context }: RenderArgs<any>) {
 export function CheckboxFieldRenderer({ props, context }: RenderArgs<any>) {
   const path = pathOf(context)
   const id = `a2ui-${path ?? props.label}`
-  const error = errorOf(props)
+  const serverError = useServerError(context, path)
+  const error = errorOf(props) ?? serverError
 
   return (
     <div className="flex flex-col gap-2">
@@ -247,35 +296,107 @@ export function CheckboxFieldRenderer({ props, context }: RenderArgs<any>) {
 }
 
 export function SubmitButtonRenderer({ props, context }: RenderArgs<any>) {
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const target: { resource?: string; operation?: string } | undefined = props.submit
+
+  /**
+   * The answers, as a request body.
+   *
+   * `/_errors` is stripped because the data model is shared: it holds what the
+   * person typed AND what the server said about it last time, and only the
+   * first half is the API's business.
+   */
+  const values = () => {
+    const model = context.dataContext?.dataModel?.get?.('/')
+    const { _errors, ...answers } = (model ?? {}) as Record<string, unknown>
+    void _errors
+    return answers
+  }
+
+  /**
+   * Put the server's complaints where the inputs can see them, and clear the
+   * previous round first — a message left behind from an earlier attempt reads
+   * as a field that is still wrong when it is not.
+   */
+  const showErrors = (result: SubmitResult, previous: string[]) => {
+    for (const field of previous) context.dataContext.set(`${ERRORS}/${field}`, '')
+    if (result.ok) return []
+    for (const [field, message] of Object.entries(result.fields)) {
+      context.dataContext.set(`${ERRORS}/${field}`, message)
+    }
+    return Object.keys(result.fields)
+  }
+
+  const [shown, setShown] = useState<string[]>([])
+
+  /**
+   * The button does the write itself.
+   *
+   * A2UI's own answer to this is `action.functionCall`, which the spec says
+   * runs "immediately on the renderer" — but web_core 0.10.4 ships no function
+   * registry, and its dispatcher only ever emits payloads containing `event`,
+   * so a functionCall action goes nowhere at all. Intercepting instead at
+   * A2UIProvider's `onAction` is possible in principle and not from here:
+   * CopilotKit mounts that provider itself and the prop it exposes to us is
+   * `{ theme, catalog, loadingComponent, sendSchemas }`, with no `onAction`.
+   *
+   * So the interception happens in the one place we already own — this
+   * renderer, which the binder hands both the data model and the raw node. The
+   * person's input reaches the API without passing through a language model,
+   * and no round trip stands between pressing the button and the record being
+   * written.
+   */
+  const save = async (resource: string, operation: string) => {
+    setBusy(true)
+    setNotice(null)
+    const result = await submit(resource, operation, values())
+    setShown(showErrors(result, shown))
+    setNotice(result.ok ? null : result.message)
+    setBusy(false)
+
+    /**
+     * Told afterwards, not asked beforehand.
+     *
+     * The agent gets the outcome as an ordinary A2UI event so it can confirm
+     * the save or explain the rejection in words — it is the narrator here, not
+     * the courier.
+     */
+    context.dispatchAction({
+      event: {
+        name: result.ok ? 'save_succeeded' : 'save_failed',
+        context: result.ok ? { resource, operation, saved: result.data } : { resource, operation, ...result },
+      },
+    })
+  }
+
   /**
    * `props.action` arrives from the binder as a ready-to-call closure — its
-   * docs call ACTION props "a ready-to-call `() => void`". Falling back to
-   * dispatching the raw node covers the case where the agent wrote an action
-   * shape the binder did not recognise, so the button is never inert.
+   * docs call ACTION props "a ready-to-call `() => void`". A form with no
+   * `submit` target keeps the old behaviour of handing everything to the agent,
+   * which is what a form that saves nowhere should do.
    */
   const fire = () => {
+    if (busy) return
+    if (target?.resource && target.operation) return void save(target.resource, target.operation)
     if (typeof props.action === 'function') return props.action()
     const raw = context.componentModel?.properties?.action
     if (raw) return context.dispatchAction(raw)
-
-    /**
-     * No action declared — submit the form anyway.
-     *
-     * The agent routinely omits `action`, and a submit button that does nothing
-     * is the worst of the failure modes we have catalogued: it looks finished.
-     * The data model already holds every answer, keyed by the paths the fields
-     * bound to, so sending it whole is the obvious default rather than an
-     * invention.
-     */
-    const values = context.dataContext?.dataModel?.get?.('/')
     return context.dispatchAction({
-      action: { event: { name: 'form_submitted', context: values ?? {} } },
+      event: { name: 'form_submitted', context: values() },
     })
   }
 
   return (
-    <Button type="button" onClick={fire} className="self-start">
-      {props.label}
-    </Button>
+    <div className="flex flex-col gap-2">
+      <Button type="button" onClick={fire} disabled={busy} className="self-start">
+        {busy ? 'Saving…' : props.label}
+      </Button>
+      {notice && (
+        <p role="alert" className="text-destructive text-sm">
+          {notice}
+        </p>
+      )}
+    </div>
   )
 }
