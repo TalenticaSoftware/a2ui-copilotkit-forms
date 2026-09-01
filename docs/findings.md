@@ -793,3 +793,100 @@ so the two halves can be separate repositories with no shared contract.
 None of the three is documented. All three were found by reading
 `@a2ui/web_core`'s source, which ships uncompiled — the single most useful thing
 in the whole dependency tree.
+
+## F27 — A2UI specifies local actions, and web_core does not implement them `[miss]`
+
+The spec is explicit that actions come in two kinds. `event` goes to the agent;
+`functionCall` is described as executing "immediately on the renderer" with no
+network involved, and is offered for exactly our case — navigation, client-side
+validation, anything the client should just do.
+
+`@a2ui/web_core@0.10.4` ships no function registry. There is no way to name a
+handler, and its dispatcher only emits payloads that contain `event`:
+
+```js
+// src/v0_9/state/surface-model.js:74
+// Note: local functionCall actions are currently handled by the renderer or
+// binder and do not necessarily need to be emitted here...
+```
+
+Neither the renderer nor the binder handles them either. A `functionCall` action
+is accepted, validated, and goes nowhere — the same silent-drop failure mode as
+F24, one layer down.
+
+## F28 — CopilotKit owns the A2UI provider, so a client cannot intercept an action `[miss]`
+
+`A2UIProvider` does take a handler:
+
+```ts
+interface A2UIProviderProps {
+  onAction?: OnActionCallback   // "invoked when a user action is dispatched"
+  theme?, catalog?, children
+}
+```
+
+But an app using CopilotKit's automatic A2UI rendering never mounts it. What
+`<CopilotKitProvider>` exposes is:
+
+```ts
+a2ui?: { theme?, catalog?, loadingComponent?, sendSchemas? }
+```
+
+No `onAction`. Reaching it means giving up automatic rendering and mounting the
+provider by hand — trading the thing that works for a hook.
+
+So the interception happens one level lower, in our own `SubmitButtonRenderer`,
+which the binder already hands both the data model and the raw component node.
+The library's seam is closed; the component's is not.
+
+## F29 — The data model is a working channel between siblings, in both directions `[hit]`
+
+A2UI's data model is presented as the agent's way of populating a UI. It is also
+usable the other way, by the client, at run time — and that is what carries a
+server rejection to the field it belongs to.
+
+The submit button hears the API; the input has to show the message; they are
+siblings with no props between them. Writing `/_errors/email` and having each
+input subscribe to its own key works, using `subscribeDynamicValue` — the same
+mechanism the binder uses for bound values, so an error re-renders for the same
+reason a typed character does. A plain `get` would not do: the value arrives
+after the press, and a snapshot taken at render time shows nothing.
+
+Two things this depends on. `dataModel.set` creates missing parents, so
+`/_errors` need not be declared. And the model doubles as the POST body, so the
+key is stripped before sending — a shared bus needs a reserved namespace, and
+nothing in A2UI provides one.
+
+## F30 — A form derived from a live API, and saved to it `[hit]`
+
+"add a user", on `gemini-3.6-flash`, against a backend it had never been told
+about. The API's log is the whole story:
+
+```
+[api] GET /api/schema        → 200    agent asks what exists
+[api] GET /api/schema/users  → 200    agent reads the JSON Schema
+[api] GET /api/schema/users  → 200    browser looks up the route to post to
+[api] POST /api/users        → 422    duplicate email
+[api] POST /api/users        → 201    corrected, and created
+```
+
+The form carried Full Name, Email Address, Role and "Email them an invitation
+now" — four fields, matching `createUserSchema` exactly. Role's options were
+`admin | editor | viewer`, the schema's enum rather than invented ones. The help
+text under each input was the schema's `.describe()` string, written once for a
+person to read and used verbatim. `sendInvite` is the proof nothing was guessed:
+nobody asking for a user form imagines that field.
+
+The 422 landed on the email input as "Someone already has that email address."
+— a conflict the schema cannot express, delivered through the same channel as
+one it can. Correcting the address cleared it and the record was written. The
+agent then said, in words, what had happened both times.
+
+Three separations held throughout. The backend never learns what a form is. The
+runtime never learns what a user is — `boundaries.test.ts` asserts it imports
+nothing from the other two and never names one of their fields. The browser
+never learns a URL — it is given a resource and an operation, and looks the
+route up in the descriptor.
+
+Which is the deployment question answered: three repositories, one HTTP
+contract, no shared package.

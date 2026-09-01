@@ -1,7 +1,11 @@
 # Prompt to form
 
-Type a sentence — "I need a register form" — into a chat box and get a working
-form, drawn with shadcn/ui. Nothing is saved anywhere.
+Say what you want to do — "I want to add a user" — and get a working form,
+drawn with shadcn/ui, whose fields come from the API's own schema. Filling it in
+and pressing the button writes a real record.
+
+Nobody has described that form anywhere. The agent asks the API what it accepts,
+reads the JSON Schema back, and composes the form from it.
 
 Built on the stack the wider POC is actually about: **CopilotKit** for the chat
 surface, **AG-UI** for streaming, and **A2UI** for turning the agent's answer
@@ -10,51 +14,70 @@ the gap this app aims at.
 
 ## Running it
 
+Three processes, because there are three parts.
+
 ```bash
-cp .env.example .env      # then add your OPENAI_API_KEY
+cp .env.example .env      # then add your key
 pnpm install
-pnpm dev:server           # runtime on :4100
+pnpm dev:api              # backend on :4200
+pnpm dev:server           # agent runtime on :4100
 pnpm dev                  # browser on :5174
 ```
 
 The server refuses to start on bad configuration rather than failing later on
 the first message — a missing key or an unknown provider is named at startup.
 
-## How it fits together
+## The three parts
+
+| | | knows |
+|---|---|---|
+| `api/` | :4200 | users. Not what a form is. |
+| `server/` | :4100 | how to run an agent. Not what a user is. |
+| `src/` | :5174 | how to draw. Not where anything lives. |
+
+They meet only over HTTP — never by import, even though they share a folder
+here. In production they are three repositories, and `boundaries.test.ts` fails
+the build if one reaches into another.
+
+## How a form happens
 
 ```
-you type  ->  CopilotKit  ->  agent  ->  render_a2ui  ->  middleware validates
-                                                              |
-          shadcn/ui form  <-  our catalog  <-  AG-UI streams it
+"add a user"
+   -> agent: list_resources, describe_resource        (HTTP, to :4200)
+   -> agent: A2UI tool, composing OUR catalog         (AG-UI stream)
+   -> browser: shadcn components, bound to a data model
+   -> press: browser looks the operation up, POSTs    (HTTP, to :4200)
+   -> agent: says what came back
 ```
 
-`src/a2ui/catalog/definitions.ts` is the single declaration underneath all of
-it. The zod schema there produces the TypeScript types, the catalog schema the
-agent is constrained by, the renderer's lookup keys, and the check that runs
-when an answer arrives.
+Two declarations, each used twice and copied nowhere.
 
-It lives in the frontend because that is the only side that can own it: a
-renderer is code, and the browser advertises this catalog to the agent on every
-run. The server imports nothing from it — `grep -c definitions server/*.ts`
-returns zero.
+`api/users.ts` holds the zod schema that `POST /api/users` validates against
+**and** that `GET /api/schema/users` publishes. `src/a2ui/catalog/definitions.ts`
+holds the zod schema the renderers are typed against **and** that the browser
+advertises to the agent on every run.
 
-## Field kinds
+The catalog lives in the frontend because that is the only side that can own it:
+a renderer is code. The server imports nothing from either —
+`grep -c definitions server/*.ts` returns zero.
 
-Seven, each mapping to exactly one shadcn/ui component. Adding an eighth is a
-deliberate decision, never something the agent can do for us — and the compiler
-enforces it: a kind with no renderer fails the build.
+## What the browser is trusted with
 
-`text` · `email` · `password` · `textarea` · `number` · `select` · `checkbox`
+The agent gives the submit button a **resource and an operation**, never a URL.
+The browser looks those up in the descriptor it fetched itself. A model that
+transcribed an endpoint could transcribe a wrong one, and a form that posts
+confidently into nowhere is worse than one that refuses.
 
 ## Commands
 
 | | |
 |---|---|
 | `pnpm dev` | Browser, :5174 |
-| `pnpm dev:server` | Runtime, :4100 |
+| `pnpm dev:server` | Agent runtime, :4100 |
+| `pnpm dev:api` | Backend, :4200 |
 | `pnpm test` | vitest |
 | `pnpm lint` | oxlint |
-| `pnpm exec tsc -b` | Typecheck app, server and config |
+| `pnpm exec tsc -b` | Typecheck app, runtime, backend and config |
 
 ## Findings
 
