@@ -9,4 +9,14 @@ export default defineConfig({
   resolve: {
     alias: { '@': path.resolve(import.meta.dirname, './src') },
   },
+  test: {
+    /**
+     * Ours only.
+     *
+     * `reference/portal-lite` is a whole other app that lives in this tree now,
+     * with its own runner (node:test) and its own suite. Picked up by a bare
+     * default glob it fails the build here, which says nothing about either app.
+     */
+    include: ['{src,server,api}/**/*.test.{ts,tsx}', 'boundaries.test.ts'],
+  },
 })

@@ -95,4 +95,7 @@ weaknesses in this code and the order to take them in.
 ## Conventions
 
 - Dependencies pinned **exactly**. No `^`, no `~`.
-- Its own git repository, separate from `portal-lite/` next door.
+- **zod 3**, deliberately — A2UI's binder reads `_def.typeName`, which zod 4 does
+  not set, and every input renders `[object Object]` with no error (F25).
+- `reference/portal-lite/` is the earlier CopilotKit evaluation, kept for
+  reading. Most of the findings here started there.
