@@ -88,6 +88,10 @@ confidently into nowhere is worse than one that refuses.
 `docs/findings.md`. That file is the actual deliverable — negative results
 included, every claim tagged with how it was established.
 
+`docs/architecture-review.md` is the other half: what the libraries do is one
+question, and what we built on top of them is another. It records four known
+weaknesses in this code and the order to take them in.
+
 ## Conventions
 
 - Dependencies pinned **exactly**. No `^`, no `~`.
