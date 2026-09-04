@@ -14,15 +14,18 @@ the gap this app aims at.
 
 ## Running it
 
-Three processes, because there are three parts.
+Three processes, because there are three parts. One command starts all three,
+each line prefixed with which one said it.
 
 ```bash
 cp .env.example .env      # then add your key
 pnpm install
-pnpm dev:api              # backend on :4200
-pnpm dev:server           # agent runtime on :4100
-pnpm dev                  # browser on :5174
+pnpm dev:all              # web :5174 · runtime :4100 · backend :4200
 ```
+
+Ctrl-C stops the set. To run one on its own — to read its output without the
+other two interleaved, or to restart just it — `pnpm dev`, `pnpm dev:server` and
+`pnpm dev:api` still do exactly that.
 
 The server refuses to start on bad configuration rather than failing later on
 the first message — a missing key or an unknown provider is named at startup.
@@ -72,6 +75,7 @@ confidently into nowhere is worse than one that refuses.
 
 | | |
 |---|---|
+| `pnpm dev:all` | All three at once |
 | `pnpm dev` | Browser, :5174 |
 | `pnpm dev:server` | Agent runtime, :4100 |
 | `pnpm dev:api` | Backend, :4200 |
