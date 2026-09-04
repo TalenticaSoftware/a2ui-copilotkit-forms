@@ -1,0 +1,18 @@
+{
+  "name": "@prompt-to-form/runtime",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "The agent runtime. Knows how to talk: the agent, its two discovery tools, and nothing about forms.",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@copilotkit/runtime": "catalog:",
+    "cors": "catalog:",
+    "dotenv": "17.4.2",
+    "express": "catalog:",
+    "zod": "catalog:"
+  }
+}

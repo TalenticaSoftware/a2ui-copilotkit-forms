@@ -1,6 +1,28 @@
-# Not a workspace — this file is where pnpm 11 reads settings from.
+# The three apps. Each has its own package.json, and that manifest is the
+# clearest statement of what the app is: api/ lists express and zod and nothing
+# about React, which is documentation no test has to explain.
+packages:
+  - apps/*
+
+# One version, three consumers.
 #
-# Same shape portal-lite uses next door, which is the version-correct key here:
+# Splitting the manifests bought isolation and introduced one new hazard: three
+# places a dependency can drift. For most packages that is a nuisance. For zod
+# it is silent and total — A2UI's binder classifies props by reading
+# `_def.typeName`, which zod 4 does not set, so a single package sliding to
+# zod 4 renders every input as "[object Object]" with no error anywhere (F25).
+#
+# The CopilotKit packages are here for the same reason: the runtime and the
+# browser negotiate a protocol, and two halves on different versions is a
+# debugging session nobody enjoys.
+catalog:
+  zod: 3.25.76
+  express: 5.2.1
+  cors: 2.8.6
+  '@copilotkit/runtime': 1.68.1
+  '@copilotkit/react-core': 1.68.1
+  '@copilotkit/a2ui-renderer': 1.68.1
+
 # esbuild links a platform binary in its postinstall and pnpm refuses to run
 # anything until that is allowed. @scarf/scarf is analytics, declined on purpose.
 allowBuilds:

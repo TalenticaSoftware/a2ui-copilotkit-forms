@@ -24,8 +24,8 @@ pnpm dev:all              # web :5174 · runtime :4100 · backend :4200
 ```
 
 Ctrl-C stops the set. To run one on its own — to read its output without the
-other two interleaved, or to restart just it — `pnpm dev`, `pnpm dev:server` and
-`pnpm dev:api` still do exactly that.
+other two interleaved, or to restart just it — `pnpm dev:web`, `pnpm dev:runtime`
+and `pnpm dev:api` do exactly that, as does `pnpm --filter @prompt-to-form/api dev`.
 
 The server refuses to start on bad configuration rather than failing later on
 the first message — a missing key or an unknown provider is named at startup.
@@ -34,9 +34,9 @@ the first message — a missing key or an unknown provider is named at startup.
 
 | | | knows |
 |---|---|---|
-| `api/` | :4200 | users. Not what a form is. |
-| `server/` | :4100 | how to run an agent. Not what a user is. |
-| `src/` | :5174 | how to draw. Not where anything lives. |
+| `apps/api` | :4200 | users. Not what a form is. |
+| `apps/runtime` | :4100 | how to run an agent. Not what a user is. |
+| `apps/web` | :5174 | how to draw. Not where anything lives. |
 
 They meet only over HTTP — never by import, even though they share a folder
 here. In production they are three repositories, and `boundaries.test.ts` fails
@@ -62,7 +62,7 @@ advertises to the agent on every run.
 
 The catalog lives in the frontend because that is the only side that can own it:
 a renderer is code. The server imports nothing from either —
-`grep -c definitions server/*.ts` returns zero.
+`grep -rc definitions apps/runtime/src` returns zero.
 
 ## What the browser is trusted with
 
@@ -76,12 +76,12 @@ confidently into nowhere is worse than one that refuses.
 | | |
 |---|---|
 | `pnpm dev:all` | All three at once |
-| `pnpm dev` | Browser, :5174 |
-| `pnpm dev:server` | Agent runtime, :4100 |
+| `pnpm dev:web` | Browser, :5174 |
+| `pnpm dev:runtime` | Agent runtime, :4100 |
 | `pnpm dev:api` | Backend, :4200 |
 | `pnpm test` | vitest |
 | `pnpm lint` | oxlint |
-| `pnpm exec tsc -b` | Typecheck app, runtime, backend and config |
+| `pnpm typecheck` | tsc -b across the three projects |
 
 ## Findings
 

@@ -7,16 +7,17 @@ import { defineConfig } from 'vitest/config'
  */
 export default defineConfig({
   resolve: {
-    alias: { '@': path.resolve(import.meta.dirname, './src') },
+    alias: { '@': path.resolve(import.meta.dirname, './apps/web/src') },
   },
   test: {
     /**
      * Ours only.
      *
-     * `reference/portal-lite` is a whole other app that lives in this tree now,
-     * with its own runner (node:test) and its own suite. Picked up by a bare
-     * default glob it fails the build here, which says nothing about either app.
+     * One runner for all three apps, so `pnpm test` at the root means what it
+     * says. `reference/portal-lite` is a whole other app in this tree with its
+     * own runner (node:test); picked up by a bare default glob it fails the
+     * build here, which says nothing about either app.
      */
-    include: ['{src,server,api}/**/*.test.{ts,tsx}', 'boundaries.test.ts'],
+    include: ['apps/*/src/**/*.test.{ts,tsx}', 'boundaries.test.ts'],
   },
 })

@@ -4,6 +4,10 @@ import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
 
 export default defineConfig({
+  // The one .env lives at the repository root, two levels up — otherwise Vite
+  // would look only in this package and the VITE_ variables would silently
+  // fall back to their defaults.
+  envDir: path.resolve(import.meta.dirname, "../.."),
   plugins: [react(), tailwindcss()],
   resolve: {
     // `import.meta.dirname`, not `__dirname`: Vite's native config loader does

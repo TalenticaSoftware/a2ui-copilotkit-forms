@@ -1,5 +1,11 @@
+import path from 'node:path'
+import dotenv from 'dotenv'
 import express from 'express'
 import cors from 'cors'
+
+// The one .env at the repository root — see apps/runtime/src/env.ts. The path
+// is stated because `pnpm --filter` runs with this package as the cwd.
+dotenv.config({ path: path.resolve(import.meta.dirname, '../../../.env') })
 import { users } from './users'
 import { projects } from './projects'
 import type { Collection } from './crud'

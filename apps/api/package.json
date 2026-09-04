@@ -1,0 +1,19 @@
+{
+  "name": "@prompt-to-form/api",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "The backend. Knows what is real: zod schemas, routes, and the descriptor derived from both.",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "cors": "catalog:",
+    "dotenv": "17.4.2",
+    "express": "catalog:",
+    "zod": "catalog:",
+    "zod-to-json-schema": "3.25.2"
+  }
+}

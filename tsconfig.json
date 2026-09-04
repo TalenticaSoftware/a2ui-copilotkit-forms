@@ -1,24 +1,9 @@
 {
   "files": [],
   "references": [
-    {
-      "path": "./tsconfig.app.json"
-    },
-    {
-      "path": "./tsconfig.node.json"
-    },
-    {
-      "path": "./tsconfig.server.json"
-    },
-    {
-      "path": "./tsconfig.api.json"
-    }
-  ],
-  "compilerOptions": {
-    "paths": {
-      "@/*": [
-        "./src/*"
-      ]
-    }
-  }
+    { "path": "./apps/web" },
+    { "path": "./apps/web/tsconfig.node.json" },
+    { "path": "./apps/runtime" },
+    { "path": "./apps/api" }
+  ]
 }

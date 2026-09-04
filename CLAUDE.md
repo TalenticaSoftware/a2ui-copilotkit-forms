@@ -8,31 +8,45 @@ Built on the stack the POC is about: **CopilotKit** for chat, **AG-UI** for
 streaming, **A2UI** for turning the agent's answer into components.
 
 ```bash
-pnpm dev:all     # all three processes, prefixed output
-pnpm test        # vitest
+pnpm dev:all     # all three, prefixed output
+pnpm test        # vitest, every app
 pnpm lint        # oxlint
-pnpm exec tsc -b # typecheck app, runtime, backend and config
+pnpm typecheck   # tsc -b across the three projects
+
+pnpm --filter @prompt-to-form/api dev   # or one on its own
 ```
 
-## Three processes, three boundaries
+## Three apps
 
 ```
-src/     the browser  :5174   knows how to DRAW   (catalog + renderers)
-server/  the runtime  :4100   knows how to TALK   (agent + its tools)
-api/     the backend  :4200   knows what is REAL  (zod schemas + routes)
+apps/web      the browser  :5174   knows how to DRAW   (catalog + renderers)
+apps/runtime  the agent    :4100   knows how to TALK   (agent + its tools)
+apps/api      the backend  :4200   knows what is REAL  (zod schemas + routes)
 ```
 
-They never import each other, and `boundaries.test.ts` fails the build if they
-try. In production these are three repositories; here they share a folder for
-convenience, and convenience is exactly how a boundary rots.
+Three package.json files, which is the point: `apps/api/package.json` lists
+express and zod and nothing about React, and that is documentation nobody has to
+be told to read. In production these are three repositories.
 
-The test checks **names as well as imports** — a field list pasted into the
-system prompt would pass an import check while making the agent's discovery a
-fiction.
+`boundaries.test.ts` holds it to that, in three ways — none of which the
+compiler can:
+
+1. **Source imports.** No app may reach into another's files.
+2. **Dependencies.** Each app declares what it may import from `node_modules`.
+   React in the backend means one of the three has stopped being what it claims.
+3. **Names.** A field list pasted into the system prompt would pass both checks
+   above while making the agent's discovery a fiction.
+
+Shared versions come from the `catalog:` in `pnpm-workspace.yaml`. Three
+manifests is three places a dependency can drift, and for zod that drift is
+silent and total (F25).
+
+One `.env`, at the root. `pnpm --filter` runs with the package as the working
+directory, so each app states the path to it rather than relying on the cwd.
 
 ## The one idea
 
-The API's validation schema **is** the form spec. `api/crud.ts` turns one zod
+The API's validation schema **is** the form spec. `apps/api/src/crud.ts` turns one zod
 schema into five routes and the descriptor that describes them, so there is
 never a second declaration to drift. Everything else is plumbing that refuses to
 make a copy of it.

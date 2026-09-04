@@ -12,7 +12,7 @@ they are to fix.
 ## What holds
 
 The `derive, never duplicate` spine is real. `createUserSchema` is validated
-against and published from one declaration, and `api/users.test.ts` asserts the
+against and published from one declaration, and `apps/api/src/users.test.ts` asserts the
 descriptor matches it field-for-field and required-for-required.
 
 `boundaries.test.ts` checks names as well as imports. That is the right
@@ -30,7 +30,7 @@ Neither of those is affected by anything below.
 `values()` in `SubmitButtonRenderer` posts whatever the data model root happens
 to contain, and that shape is decided entirely by JSON pointers the *agent*
 chose. The only thing tying them to the API's field names is a line of English
-in `server/prompt.ts`:
+in `apps/runtime/src/prompt.ts`:
 
 > Bind each input to a path named after its property — an "email" property binds
 > to "/email"
@@ -57,8 +57,8 @@ not a contract.
 
 **Severity: high. Same root cause as A1.**
 
-`{ error: { message, fields } }` is declared in `api/users.ts` and re-parsed in
-`src/lib/api.ts` as `payload?.error?.fields ?? {}` — a second hand-maintained
+`{ error: { message, fields } }` is declared in `apps/api/src/users.ts` and re-parsed in
+`apps/web/src/lib/api.ts` as `payload?.error?.fields ?? {}` — a second hand-maintained
 copy of a fact across an HTTP boundary, which is exactly what the descriptor
 exists to abolish. The optional chaining means a change to the error shape
 degrades to a bare "The API answered 422." with every field message dropped, and
@@ -93,7 +93,7 @@ dispatched event so the agent cannot narrate a save.
 
 | covered | not covered |
 | --- | --- |
-| descriptor ↔ schema (5) | `src/lib/api.ts`, every line |
+| descriptor ↔ schema (5) | `apps/web/src/lib/api.ts`, every line |
 | boundaries (3) | the `POST /users` handler — 422, dedupe, 201 |
 | catalog shape (6) | the `_errors` round trip |
 
@@ -117,7 +117,7 @@ and most intricate code is the untested code.
   `no-store`. An API that restarts with a changed schema mid-session is posted
   to on stale information.
 - **No auth, open CORS, in-memory storage.** Deliberate for a POC and stated in
-  `api/index.ts`. Named here so nobody reads this as production-shaped.
+  `apps/api/src/index.ts`. Named here so nobody reads this as production-shaped.
 
 ---
 
