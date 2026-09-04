@@ -1,7 +1,8 @@
 import express from 'express'
 import cors from 'cors'
-import { describeUsers, usersRouter } from './users'
-import type { ResourceDescriptor } from './describe'
+import { users } from './users'
+import { projects } from './projects'
+import type { Collection } from './crud'
 
 /**
  * The backend under test.
@@ -20,9 +21,22 @@ import type { ResourceDescriptor } from './describe'
 
 const PORT = Number(process.env.API_PORT ?? 4200)
 
-const DESCRIBERS: Record<string, () => ResourceDescriptor> = {
-  users: describeUsers,
-}
+/** Every resource this API serves. Adding one is adding a line here. */
+const COLLECTIONS: Collection[] = [users, projects]
+const BY_NAME = new Map(COLLECTIONS.map((entry) => [entry.name, entry]))
+
+/**
+ * Rules that span resources are wired here, where both are in scope.
+ *
+ * Removing a user who owns a project would leave that project pointing at
+ * nobody — the reference check on the way in means nothing if it can be voided
+ * on the way out.
+ */
+users.guardDelete((user) =>
+  projects.all().some((project) => project.ownerId === user.id)
+    ? 'That person still owns a project. Give it a new owner first.'
+    : null,
+)
 
 const app = express()
 
@@ -47,7 +61,7 @@ app.use((request, response, next) => {
 
 /** What resources exist. The agent starts here, knowing no names in advance. */
 app.get('/api/schema', (_request, response) => {
-  response.json({ data: { resources: Object.keys(DESCRIBERS) } })
+  response.json({ data: { resources: COLLECTIONS.map((entry) => entry.name) } })
 })
 
 /**
@@ -58,15 +72,17 @@ app.get('/api/schema', (_request, response) => {
  * after someone has typed everything in.
  */
 app.get('/api/schema/:resource', (request, response) => {
-  const describe = DESCRIBERS[String(request.params.resource)]
-  if (!describe) return response.status(404).json({ error: { message: 'No such resource.' } })
+  const found = BY_NAME.get(String(request.params.resource))
+  if (!found) return response.status(404).json({ error: { message: 'No such resource.' } })
   response.set('Cache-Control', 'no-store')
-  return response.json({ data: describe() })
+  return response.json({ data: found.describe() })
 })
 
-app.use('/api', usersRouter)
+for (const entry of COLLECTIONS) app.use(entry.router)
 
 app.listen(PORT, () => {
   console.log(`[api] listening on http://localhost:${PORT}`)
-  console.log(`[api] resources: ${Object.keys(DESCRIBERS).join(', ')} — described at /api/schema/:resource`)
+  console.log(
+    `[api] resources: ${COLLECTIONS.map((entry) => entry.name).join(', ')} — described at /api/schema/:resource`,
+  )
 })

@@ -1,11 +1,10 @@
-import { Router } from 'express'
 import { z } from 'zod'
-import { json, type ResourceDescriptor } from './describe'
+import { collection } from './crud'
 
 /**
- * The users resource: one schema, used twice.
+ * The users resource: one schema, used everywhere.
  *
- * `createUserSchema` is what the route validates against AND what the
+ * `createUserSchema` is what the routes validate against AND what the
  * descriptor publishes. There is no second copy for the client to read, which
  * is the entire point — add a field here and the form grows one, with nothing
  * else edited anywhere.
@@ -22,57 +21,31 @@ export const createUserSchema = z.object({
     .describe('Email them an invitation now. Defaults to true when omitted.'),
 })
 
-export function describeUsers(): ResourceDescriptor {
-  return {
-    resource: 'users',
-    operations: [
-      {
-        key: 'create',
-        method: 'POST',
-        path: '/api/users',
-        summary: 'Add a person to the workspace.',
-        body: json(createUserSchema),
-      },
-    ],
-  }
-}
-
-/** Stands in for a database. Restarting the server forgets everyone. */
-const users: Array<z.infer<typeof createUserSchema> & { id: string }> = []
-
-export const usersRouter = Router()
-
-usersRouter.post('/users', (request, response) => {
-  const parsed = createUserSchema.safeParse(request.body)
+export const users = collection({
+  name: 'users',
+  singular: 'user',
+  schema: createUserSchema,
 
   /**
-   * Field-keyed errors, not a sentence.
-   *
-   * The client puts these back on the inputs they belong to, so the shape has
-   * to be addressable. A flat "Validation failed" string would force the form
-   * to show a banner and leave the person hunting for which box is wrong.
+   * Uniqueness is not something a schema can state — it is a fact about the
+   * other records. Reported field-keyed so it lands on the email input, the
+   * same way a malformed address does; the client needs no second code path
+   * for "business" errors.
    */
-  if (!parsed.success) {
-    const fields: Record<string, string> = {}
-    for (const issue of parsed.error.issues) {
-      const field = issue.path.join('.')
-      if (field && !fields[field]) fields[field] = issue.message
-    }
-    return response.status(422).json({ error: { message: 'Some fields need attention.', fields } })
-  }
+  validate: (input, others) =>
+    others.some((other) => other.email === input.email)
+      ? { email: 'Someone already has that email address.' }
+      : null,
 
-  if (users.some((user) => user.email === parsed.data.email)) {
-    return response.status(422).json({
-      error: {
-        message: 'Some fields need attention.',
-        // A conflict the schema cannot express, reported the same way as one it
-        // can, so the client needs no second code path for "business" errors.
-        fields: { email: 'Someone already has that email address.' },
-      },
-    })
-  }
-
-  const user = { id: `user_${users.length + 1}`, ...parsed.data }
-  users.push(user)
-  return response.status(201).json({ data: user })
+  /**
+   * Seeded, so a fresh server can be listed and a project can be owned.
+   *
+   * An empty collection makes the read direction untestable without first
+   * exercising the write direction, which couples two demonstrations that
+   * should fail independently.
+   */
+  seed: [
+    { fullName: 'Ada Okonkwo', email: 'ada@example.com', role: 'admin', sendInvite: false },
+    { fullName: 'Bo Lindqvist', email: 'bo@example.com', role: 'editor', sendInvite: false },
+  ],
 })
