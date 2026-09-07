@@ -76,6 +76,15 @@ describe('the catalog matches its definitions', () => {
     expect(Object.keys(load.unwrap().shape).sort()).toEqual(['id', 'resource'])
   })
 
+  /**
+   * Deleting must go through a confirmation the person presses. The agent may
+   * ask; it may not remove anything itself.
+   */
+  test('the confirm card names a record, and the agent cannot skip it', () => {
+    const shape = definitions.ConfirmCard.props.shape as Record<string, any>
+    expect(Object.keys(shape).sort()).toEqual(['confirmLabel', 'id', 'message', 'resource', 'title'])
+  })
+
   test('the container takes children by id, never inline', () => {
     const description = String(definitions.FormCard.props.shape.children.description)
     expect(description.toLowerCase()).toContain('inline')

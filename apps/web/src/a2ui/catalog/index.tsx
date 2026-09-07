@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { CATALOG_ID, definitions } from './definitions'
 import {
   CheckboxFieldRenderer,
+  ConfirmCardRenderer,
   FormCardRenderer,
   SelectFieldRenderer,
   SubmitButtonRenderer,
@@ -52,6 +53,7 @@ const renderers = {
   SelectField: SelectFieldRenderer,
   CheckboxField: CheckboxFieldRenderer,
   TableView: TableViewRenderer,
+  ConfirmCard: ConfirmCardRenderer,
   SubmitButton: SubmitButtonRenderer,
 } as const
 

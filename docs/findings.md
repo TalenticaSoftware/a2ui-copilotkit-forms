@@ -951,3 +951,55 @@ Not attributable to the quota exhaustion in F31 — that run terminated with
 when the free tier ran out. Whoever picks this up: tee the run endpoint's
 response body in the page, and compare a working render's payload against this
 one field by field.
+
+---
+
+## F33 — `agent.runAgent()` loses the run context, and A2UI dies with it `[hit]`
+
+A row action that called `agent.runAgent()` directly produced a fatal, and
+completely misleading, error:
+
+```
+A2UI render error: Catalog not found:
+https://a2ui.org/specification/v0_9/basic_catalog.json
+```
+
+Nothing about the catalog was wrong. The injected tool's own instructions say
+the model must NOT choose a catalog:
+
+> the catalog id is set by the host, not by you. Do not include a catalogId
+> argument.
+
+The host finds it in the run's CONTEXT — `@ag-ui/a2ui-middleware` scans
+`context` for the entry whose description is the A2UI schema constant and reads
+`catalogId` out of its JSON value. That entry is assembled by CopilotKit's core,
+in `copilotkit.runAgent({ agent })`. Started straight off the agent, a run
+carries no context, the middleware falls back to its hardcoded basic-catalog id,
+and `@a2ui/web_core` throws from `processCreateSurfaceMessage` because the
+renderer is built as `new MessageProcessor([catalog ?? basicCatalog])` — a list
+of ONE, matched by exact id, with nothing to fall back to.
+
+Reproduce: call `agent.runAgent()` from a component while a custom catalog is
+configured. Fix: run through `useCopilotKit().copilotkit.runAgent({ agent })`.
+
+This also explains **F32**, which is now withdrawn as a separate finding: same
+cause, failing silently that time rather than loudly.
+
+## F34 — Every A2UI surface is clipped 1px on its left `[hit]`
+
+CopilotKit renders each surface inside a scroll viewport whose computed padding
+is `24px 0px` — vertical only. An `overflow` other than `visible` clips to the
+PADDING box, so the clip edge and a surface's left edge are the same pixel.
+
+shadcn's `ring-1` is a box-shadow with 1px spread, painted OUTSIDE the border
+box. At zero inset that pixel is outside the clip box and is shaved off, which
+reads as a broken layout rather than a clipped one — it happens at rest, with
+`scrollLeft: 0` and `scrollWidth === clientWidth`. Nothing is overflowing.
+
+Measured: card `left: 139`, clip box `left: 139`, card box-shadow
+`… 0px 0px 0px 1px`.
+
+Worth knowing: it cannot be fixed by dropping the overflow on one axis, because
+`overflow-x: visible` with `overflow-y: auto` computes back to `auto`. Either
+give the surface a horizontal inset, or lose vertical scrolling. A 2px margin on
+our own card is the smaller intervention and depends on none of their DOM.

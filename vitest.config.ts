@@ -19,5 +19,11 @@ export default defineConfig({
      * build here, which says nothing about either app.
      */
     include: ['apps/*/src/**/*.test.{ts,tsx}', 'boundaries.test.ts'],
+    /**
+     * The catalog reaches CopilotKit now, and CopilotKit ships a stylesheet.
+     * Left external, Node's ESM loader is handed a `.css` file and refuses it;
+     * inlined, Vite transforms it the way the browser build already does.
+     */
+    server: { deps: { inline: [/@copilotkit/] } },
   },
 })

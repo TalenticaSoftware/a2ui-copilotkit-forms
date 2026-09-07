@@ -187,6 +187,25 @@ export const definitions = {
     }),
   },
 
+  ConfirmCard: {
+    description:
+      'Ask the person to confirm something destructive, then do it. Use this ' +
+      'when someone asks to DELETE or remove a record: name what will go, and ' +
+      'give the resource and the id. Never delete without drawing this first.',
+    props: z.object({
+      title: z.string().describe('e.g. "Delete this user?"'),
+      message: z
+        .string()
+        .describe('What will happen, naming the record. Say if it cannot be undone.'),
+      resource: z.string().describe('The resource name, as returned by list_resources.'),
+      id: z.string().describe('Which record to remove.'),
+      confirmLabel: z
+        .string()
+        .optional()
+        .describe('The destructive button, e.g. "Delete user". Defaults to "Delete".'),
+    }),
+  },
+
   SubmitButton: {
     description:
       'The button that submits the form. Name the action it performs — ' +

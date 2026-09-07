@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { EyeIcon, EyeOffIcon } from 'lucide-react'
+import { CheckIcon, EyeIcon, EyeOffIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -22,6 +23,9 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { describeResource, labelsFor, read, submit, type SubmitResult } from '@/lib/api'
+import { useAgentContext } from '@copilotkit/react-core/v2'
+import { useIsCurrentTurn, staleClass } from '@/a2ui/turn'
+import { useAsk } from '@/a2ui/ask'
 
 /**
  * shadcn, drawn from A2UI component nodes.
@@ -101,6 +105,35 @@ function errorOf(props: Record<string, any>): string | null {
 const ERRORS = '/_errors'
 
 /**
+ * Where a finished save leaves its confirmation.
+ *
+ * The button knows the save worked; the card is what has to stop being a form.
+ * They are a leaf and its container with no props between them, so the message
+ * travels the only way they share — the data model — exactly as field errors
+ * do. Underscored, and stripped from the body before posting.
+ */
+const SAVED = '/_saved'
+
+/**
+ * Two pixels, so the card's ring is not shaved off its left edge.
+ *
+ * CopilotKit renders every A2UI surface inside a scroll viewport — `flex-1
+ * min-h-0 overflow-auto` — whose padding is `24px 0px`: vertical only. An
+ * `overflow` other than visible clips to the PADDING box, so with no horizontal
+ * padding the clip edge and the card's left edge are the same pixel.
+ *
+ * shadcn's `ring-1` is a box-shadow with 1px spread, which paints OUTSIDE the
+ * border box. At zero inset that pixel is outside the clip box, and the card
+ * looks sliced down its left side — at rest, with nothing scrolled and nothing
+ * overflowing, which is why it reads as a layout bug rather than a scroll one.
+ *
+ * Fixed from our side rather than by overriding their container: a rule aimed
+ * at CopilotKit's DOM would break the day they rename a class, and this cannot.
+ * 2px covers the 1px ring and the 1.5px focus outline.
+ */
+const SURFACE = 'm-0.5'
+
+/**
  * The server's complaint about one field, kept current.
  *
  * Subscribed rather than read, because a plain `get` is a snapshot: the value
@@ -113,18 +146,22 @@ const ERRORS = '/_errors'
  * `errorOf(props) ?? useServerError(...)` it is a conditional hook, skipped
  * whenever a local check already failed.
  */
-function useServerError(context: A2UIContext, path: string | null): string | null {
+function useModelValue(context: A2UIContext, path: string | null): string | null {
   const [message, setMessage] = useState<string | null>(null)
   const subscribe = context.dataContext.subscribeDynamicValue
   useEffect(() => {
     if (!path || !subscribe) return
-    const subscription = subscribe.call(context.dataContext, { path: `${ERRORS}${path}` }, (next) =>
+    const subscription = subscribe.call(context.dataContext, { path }, (next) =>
       setMessage(typeof next === 'string' && next ? next : null),
     )
     return () => subscription.unsubscribe()
   }, [context.dataContext, subscribe, path])
   return message
 }
+
+/** The server's complaint about one field. */
+const useServerError = (context: A2UIContext, path: string | null) =>
+  useModelValue(context, path ? `${ERRORS}${path}` : null)
 
 function Field({
   label,
@@ -177,6 +214,8 @@ export function FormCardRenderer({ props, context, buildChild }: RenderArgs<any>
    * in the update route.
    */
   const [failed, setFailed] = useState<string | null>(null)
+  const saved = useModelValue(context, SAVED)
+  const stale = !useIsCurrentTurn()
   const dataContext = context.dataContext
   useEffect(() => {
     if (!resource || !id) return
@@ -193,22 +232,35 @@ export function FormCardRenderer({ props, context, buildChild }: RenderArgs<any>
     }
   }, [resource, id, dataContext])
   return (
-    <Card>
+    <Card className={SURFACE}>
       <CardHeader>
         <CardTitle>{props.title}</CardTitle>
         {props.description && <CardDescription>{props.description}</CardDescription>}
       </CardHeader>
-      <CardContent className="flex flex-col gap-5">
+      <CardContent className={cn('flex flex-col gap-5', staleClass(stale))}>
         {failed && (
           <p role="alert" className="text-destructive text-sm">
             {failed}
           </p>
         )}
-        {children.map((child: any) => {
-          // A2UI hands children either as ids or as { id, basePath } objects.
-          const id = typeof child === 'string' ? child : child?.id
-          return id ? <div key={id}>{buildChild(id)}</div> : null
-        })}
+        {/*
+          Once it has saved, it stops being a form.
+          Leaving the inputs behind would leave a card that still looks
+          editable and no longer means anything — and scrolling back through a
+          conversation, a stale form reads as work that was never finished.
+        */}
+        {saved ? (
+          <p className="text-muted-foreground flex items-center gap-2 text-sm">
+            <CheckIcon className="text-foreground size-4 shrink-0" aria-hidden="true" />
+            {saved}
+          </p>
+        ) : (
+          children.map((child: any) => {
+            // A2UI hands children either as ids or as { id, basePath } objects.
+            const id = typeof child === 'string' ? child : child?.id
+            return id ? <div key={id}>{buildChild(id)}</div> : null
+          })
+        )}
       </CardContent>
     </Card>
   )
@@ -336,6 +388,7 @@ export function CheckboxFieldRenderer({ props, context }: RenderArgs<any>) {
 }
 
 export function SubmitButtonRenderer({ props, context }: RenderArgs<any>) {
+  const stale = !useIsCurrentTurn()
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const target: { resource?: string; operation?: string } | undefined = props.submit
@@ -349,8 +402,9 @@ export function SubmitButtonRenderer({ props, context }: RenderArgs<any>) {
    */
   const values = () => {
     const model = context.dataContext?.dataModel?.get?.('/')
-    const { _errors, ...answers } = (model ?? {}) as Record<string, unknown>
+    const { _errors, _saved, ...answers } = (model ?? {}) as Record<string, unknown>
     void _errors
+    void _saved
     return answers
   }
 
@@ -390,10 +444,36 @@ export function SubmitButtonRenderer({ props, context }: RenderArgs<any>) {
   const save = async (resource: string, operation: string) => {
     setBusy(true)
     setNotice(null)
-    const result = await submit(resource, operation, values())
+    const sent = values()
+    const result = await submit(resource, operation, sent)
     setShown(showErrors(result, shown))
     setNotice(result.ok ? null : result.message)
     setBusy(false)
+
+    /**
+     * Told to the card, which is what has to stop being a form.
+     *
+     * Named from what was sent rather than from what came back, because the
+     * API decides the record's shape and this has no business knowing which
+     * field is its name.
+     */
+    if (result.ok) {
+      const [named] = Object.entries(sent)
+        /**
+         * Identifiers are not names. An edit carries `/id` in the data model
+         * so the button can fill the `:id` in the route, and taking the first
+         * string in the object found that first — "Saved — user_1." for a
+         * person whose name was sitting two fields further down.
+         *
+         * `*Id` goes too: a reference stores an id and shows a label, so it is
+         * no better a name than `id` itself.
+         */
+        .filter(([key]) => key !== 'id' && !/Id$/.test(key))
+        .filter(([, value]) => typeof value === 'string' && value.trim().length > 0)
+        .map(([, value]) => String(value))
+
+      context.dataContext.set(SAVED, named ? `Saved — ${named}.` : 'Saved.')
+    }
 
     /**
      * Told afterwards, not asked beforehand.
@@ -429,7 +509,7 @@ export function SubmitButtonRenderer({ props, context }: RenderArgs<any>) {
 
   return (
     <div className="flex flex-col gap-2">
-      <Button type="button" onClick={fire} disabled={busy} className="self-start">
+      <Button type="button" onClick={fire} disabled={busy || stale} className="self-start">
         {busy ? 'Saving…' : props.label}
       </Button>
       {notice && (
@@ -454,7 +534,9 @@ type Row = Record<string, unknown>
  * `resource` and the operation name, never a URL: same rule as the submit
  * button, for the same reason.
  */
-export function TableViewRenderer({ props, context }: RenderArgs<any>) {
+export function TableViewRenderer({ props }: RenderArgs<any>) {
+  const ask = useAsk()
+  const stale = !useIsCurrentTurn()
   const resource: string = props.resource
   const columns: Array<{ field: string; label: string }> = Array.isArray(props.columns)
     ? props.columns
@@ -464,11 +546,6 @@ export function TableViewRenderer({ props, context }: RenderArgs<any>) {
   const [rows, setRows] = useState<Row[] | null>(null)
   const [labels, setLabels] = useState<Record<string, Record<string, string>>>({})
   const [problem, setProblem] = useState<string | null>(null)
-  const [confirming, setConfirming] = useState<string | null>(null)
-  const [busy, setBusy] = useState<string | null>(null)
-
-  /** Bumped after a delete, to re-read rather than patch the list in place. */
-  const [generation, setGeneration] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -489,7 +566,7 @@ export function TableViewRenderer({ props, context }: RenderArgs<any>) {
     return () => {
       cancelled = true
     }
-  }, [resource, generation])
+  }, [resource])
 
   /** A reference shows its label; everything else shows itself. */
   const display = (field: string, value: unknown) => {
@@ -500,43 +577,55 @@ export function TableViewRenderer({ props, context }: RenderArgs<any>) {
     return String(value)
   }
 
-  const remove = async (id: string) => {
-    setBusy(id)
-    const result = await submit(resource, 'delete', { id })
-    setBusy(null)
-    setConfirming(null)
-    if (!result.ok) {
-      /**
-       * A refused delete is shown here AND told to the agent. The API refuses
-       * one that would strand a reference — "still owns a project" — and that
-       * is a sentence the person needs, not a row that quietly stayed put.
-       */
-      setProblem(result.message)
-    } else {
-      setProblem(null)
-      setGeneration((n) => n + 1)
-    }
-    context.dispatchAction({
-      event: {
-        name: result.ok ? 'record_deleted' : 'delete_refused',
-        context: { resource, id, ...(result.ok ? {} : { reason: result.message }) },
-      },
-    })
+  /**
+   * Both actions ASK, rather than act.
+   *
+   * Pressing Edit or Delete now says so in the conversation and lets the agent
+   * answer — an edit form, or a confirmation card. Nothing destructive happens
+   * from a table row, and nothing appears without the transcript explaining
+   * where it came from.
+   *
+   * The record is named rather than identified: "Delete Bo Lindqvist" is what a
+   * person would say, and the agent already has the id from the same row it is
+   * looking at. The id goes along for the cases where two records read alike.
+   */
+  /**
+   * What is on screen, so a NAME is enough to act on.
+   *
+   * The message says "Edit Ada Okonkwo" and never "(user_1)", because an id in
+   * a sentence a person reads is noise. But the agent still has to know which
+   * record that is, and it cannot: it reads schemas, never rows.
+   *
+   * So the ids of the visible rows travel as context — and only the id and the
+   * one column used as a label, not the records. The trade is deliberate and
+   * worth naming: this is the first row data to reach the model at all. It buys
+   * something real beyond tidier text, which is that TYPING "edit Ada Okonkwo"
+   * now works exactly as pressing the button does.
+   */
+  useAgentContext({
+    description:
+      `Records currently listed on screen for "${resource}". Use these ids when ` +
+      'the person names one of them.',
+    value: {
+      resource,
+      records: (rows ?? []).map((row) => ({
+        id: String(row.id),
+        label: columns[0]?.field ? display(columns[0].field, row[columns[0].field]) : String(row.id),
+      })),
+    },
+  })
+
+  const nameOf = (row: Row, id: string) => {
+    const first = columns[0]?.field
+    const label = first ? display(first, row[first]) : null
+    return label && label !== '—' ? label : id
   }
 
-  /**
-   * Edit hands back to the agent rather than rendering a form itself.
-   *
-   * A renderer cannot invent a surface the agent did not describe, and it
-   * should not want to: the agent knows the schema, so it can draw the right
-   * form with `load` pointing at this row. The button says what happened and
-   * lets the thing that knows how to draw, draw.
-   */
-  const edit = (id: string) =>
-    context.dispatchAction({ event: { name: 'edit_requested', context: { resource, id } } })
+  const edit = (row: Row, id: string) => ask(`Edit ${nameOf(row, id)}`)
+  const remove = (row: Row, id: string) => ask(`Delete ${nameOf(row, id)}`)
 
   return (
-    <Card>
+    <Card className={SURFACE}>
       <CardHeader>
         <CardTitle>{props.title ?? resource}</CardTitle>
         {rows && (
@@ -545,7 +634,7 @@ export function TableViewRenderer({ props, context }: RenderArgs<any>) {
           </CardDescription>
         )}
       </CardHeader>
-      <CardContent className="flex flex-col gap-3">
+      <CardContent className={cn('flex flex-col gap-3', staleClass(stale))}>
         {problem && (
           <p role="alert" className="text-destructive text-sm">
             {problem}
@@ -583,22 +672,27 @@ export function TableViewRenderer({ props, context }: RenderArgs<any>) {
                       ))}
                       {showActions && (
                         <TableCell className="text-right whitespace-nowrap">
-                          <Button variant="ghost" size="sm" onClick={() => edit(id)}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={stale}
+                            onClick={() => edit(row, id)}
+                          >
                             Edit
                           </Button>
                           {/*
-                            Two presses, not a dialog. Delete cannot be undone —
-                            the records live in memory — and a button that removes
-                            a row on one click, in a chat, is the wrong default.
+                            No inline "Sure?" any more. Confirming a delete in a
+                            table cell hides the decision in the corner of a row;
+                            asked in the conversation it is a turn a person reads,
+                            and one the transcript keeps.
                           */}
                           <Button
-                            variant={confirming === id ? 'destructive' : 'ghost'}
+                            variant="ghost"
                             size="sm"
-                            disabled={busy === id}
-                            onClick={() => (confirming === id ? remove(id) : setConfirming(id))}
-                            onBlur={() => setConfirming((current) => (current === id ? null : current))}
+                            disabled={stale}
+                            onClick={() => remove(row, id)}
                           >
-                            {busy === id ? '…' : confirming === id ? 'Sure?' : 'Delete'}
+                            Delete
                           </Button>
                         </TableCell>
                       )}
@@ -609,6 +703,83 @@ export function TableViewRenderer({ props, context }: RenderArgs<any>) {
             </Table>
           </div>
         )}
+      </CardContent>
+    </Card>
+  )
+}
+
+/**
+ * The one place a record gets removed.
+ *
+ * Drawn by the agent when someone asks to delete something, so the decision
+ * lives in the conversation rather than in the corner of a table row. The
+ * button still does the work from the browser — the agent has no ability to
+ * destroy anything, it can only ask whether we should.
+ */
+export function ConfirmCardRenderer({ props, context }: RenderArgs<any>) {
+  const stale = !useIsCurrentTurn()
+  const ask = useAsk()
+  const [busy, setBusy] = useState(false)
+  const [outcome, setOutcome] = useState<{ ok: boolean; message: string } | null>(null)
+
+  const resource: string = props.resource
+  const id: string = props.id
+
+  const confirm = async () => {
+    setBusy(true)
+    const result = await submit(resource, 'delete', { id })
+    setBusy(false)
+    setOutcome({
+      ok: result.ok,
+      message: result.ok ? 'Deleted.' : result.message,
+    })
+    /**
+     * The agent is told either way, and a refusal matters more than a success:
+     * the API declines a delete that would strand a reference, and that reason
+     * is a sentence the person needs rather than a button that did nothing.
+     */
+    context.dispatchAction({
+      event: {
+        name: result.ok ? 'record_deleted' : 'delete_refused',
+        context: { resource, id, ...(result.ok ? {} : { reason: result.message }) },
+      },
+    })
+  }
+
+  if (outcome) {
+    return (
+      <Card className={SURFACE}>
+        <CardContent className="pt-6">
+          <p
+            className={cn('flex items-center gap-2 text-sm', !outcome.ok && 'text-destructive')}
+            role={outcome.ok ? undefined : 'alert'}
+          >
+            {outcome.ok && <CheckIcon className="size-4 shrink-0" aria-hidden="true" />}
+            {outcome.message}
+          </p>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  return (
+    <Card className={SURFACE}>
+      <CardHeader>
+        <CardTitle>{props.title}</CardTitle>
+        <CardDescription>{props.message}</CardDescription>
+      </CardHeader>
+      <CardContent className={cn('flex gap-2', staleClass(stale))}>
+        <Button variant="destructive" disabled={busy || stale} onClick={confirm}>
+          {busy ? 'Deleting…' : (props.confirmLabel ?? 'Delete')}
+        </Button>
+        {/*
+          Cancel says so out loud. A card that silently vanishes leaves a
+          transcript where someone asked to delete something and nothing
+          answered — which reads, later, as though it went through.
+        */}
+        <Button variant="outline" disabled={busy || stale} onClick={() => ask('Cancel that.')}>
+          Cancel
+        </Button>
       </CardContent>
     </Card>
   )
