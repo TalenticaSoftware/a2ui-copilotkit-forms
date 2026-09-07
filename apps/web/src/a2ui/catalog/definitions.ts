@@ -82,6 +82,23 @@ export const definitions = {
       children: z
         .array(z.string())
         .describe('Ids of the components inside, in order. Never define them inline.'),
+      /**
+       * Editing, without the record passing through the agent.
+       *
+       * Given this, the card fetches the record itself and seeds the data model
+       * before the inputs read it, so every field starts at its current value.
+       * The alternative — the agent reading the record and writing the values
+       * into the form as literals — puts real data through a language model on
+       * its way to a screen, which is both a token bill and a chance to get a
+       * digit wrong.
+       */
+      load: z
+        .object({
+          resource: z.string().describe('The resource name, e.g. "users".'),
+          id: z.string().describe('Which record to load into the form.'),
+        })
+        .optional()
+        .describe('Fill the form from an existing record. Omit when creating.'),
     }),
   },
 
@@ -136,6 +153,37 @@ export const definitions = {
       value: binding,
       required: z.boolean(),
       checks,
+    }),
+  },
+
+  TableView: {
+    description:
+      'A table of existing records. Use this whenever someone asks to SEE, ' +
+      'list, show or find things. Name the resource and the columns worth ' +
+      'showing — you know the fields from the descriptor — and the browser ' +
+      'fetches the rows itself. Never type the rows out yourself.',
+    props: z.object({
+      title: z.string().describe('A heading, e.g. "Users".'),
+      resource: z.string().describe('The resource name, as returned by list_resources.'),
+      /**
+       * Which columns, chosen by the agent from the descriptor's `returns`.
+       *
+       * Not every field: a table showing all of them is a table nobody reads.
+       * The agent has the schema and the request, which is exactly the context
+       * needed to pick.
+       */
+      columns: z
+        .array(
+          z.object({
+            field: z.string().describe('The property name, as in the schema.'),
+            label: z.string().describe('The column heading, written for a person.'),
+          }),
+        )
+        .describe('The columns to show, in order. Pick the useful ones, not all of them.'),
+      actions: z
+        .boolean()
+        .optional()
+        .describe('Show Edit and Delete on each row. Default true; set false for a plain listing.'),
     }),
   },
 

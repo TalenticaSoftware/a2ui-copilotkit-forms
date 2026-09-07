@@ -13,7 +13,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { submit, type SubmitResult } from '@/lib/api'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import { describeResource, labelsFor, read, submit, type SubmitResult } from '@/lib/api'
 
 /**
  * shadcn, drawn from A2UI component nodes.
@@ -155,8 +163,35 @@ function Field({
   )
 }
 
-export function FormCardRenderer({ props, buildChild }: RenderArgs<any>) {
+export function FormCardRenderer({ props, context, buildChild }: RenderArgs<any>) {
   const children: string[] = Array.isArray(props.children) ? props.children : []
+  const resource: string | undefined = props.load?.resource
+  const id: string | undefined = props.load?.id
+
+  /**
+   * Editing starts from the record, not from a blank form.
+   *
+   * Fetched here and written into the data model, so the inputs — which read
+   * that model and know nothing about where it came from — start at the current
+   * values. `/id` is written too: the submit button needs it to fill the `:id`
+   * in the update route.
+   */
+  const [failed, setFailed] = useState<string | null>(null)
+  const dataContext = context.dataContext
+  useEffect(() => {
+    if (!resource || !id) return
+    let cancelled = false
+    read(resource, 'get', { id }).then((result) => {
+      if (cancelled) return
+      if (!result.ok) return setFailed(result.message)
+      for (const [key, value] of Object.entries((result.data ?? {}) as Record<string, unknown>)) {
+        dataContext.set(`/${key}`, value)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [resource, id, dataContext])
   return (
     <Card>
       <CardHeader>
@@ -164,6 +199,11 @@ export function FormCardRenderer({ props, buildChild }: RenderArgs<any>) {
         {props.description && <CardDescription>{props.description}</CardDescription>}
       </CardHeader>
       <CardContent className="flex flex-col gap-5">
+        {failed && (
+          <p role="alert" className="text-destructive text-sm">
+            {failed}
+          </p>
+        )}
         {children.map((child: any) => {
           // A2UI hands children either as ids or as { id, basePath } objects.
           const id = typeof child === 'string' ? child : child?.id
@@ -398,5 +438,178 @@ export function SubmitButtonRenderer({ props, context }: RenderArgs<any>) {
         </p>
       )}
     </div>
+  )
+}
+
+type Row = Record<string, unknown>
+
+/**
+ * A table of what actually exists.
+ *
+ * The agent decides a table belongs here and which columns to show; the browser
+ * fetches the rows. That split matters twice over — a listing of any size stays
+ * off the token bill, and nothing on screen can be a record the model invented,
+ * which is the failure Second Brain demonstrates at length.
+ *
+ * `resource` and the operation name, never a URL: same rule as the submit
+ * button, for the same reason.
+ */
+export function TableViewRenderer({ props, context }: RenderArgs<any>) {
+  const resource: string = props.resource
+  const columns: Array<{ field: string; label: string }> = Array.isArray(props.columns)
+    ? props.columns
+    : []
+  const showActions = props.actions !== false
+
+  const [rows, setRows] = useState<Row[] | null>(null)
+  const [labels, setLabels] = useState<Record<string, Record<string, string>>>({})
+  const [problem, setProblem] = useState<string | null>(null)
+  const [confirming, setConfirming] = useState<string | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+
+  /** Bumped after a delete, to re-read rather than patch the list in place. */
+  const [generation, setGeneration] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([read(resource, 'list'), describeResource(resource).catch(() => null)]).then(
+      async ([listed, descriptor]) => {
+        if (cancelled) return
+        if (!listed.ok) return setProblem(listed.message)
+        // Cleared here rather than at the top of the effect: resetting state
+        // synchronously inside an effect starts a second render for nothing.
+        setProblem(null)
+        setRows(Array.isArray(listed.data) ? (listed.data as Row[]) : [])
+        if (descriptor) {
+          const resolved = await labelsFor(descriptor)
+          if (!cancelled) setLabels(resolved)
+        }
+      },
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [resource, generation])
+
+  /** A reference shows its label; everything else shows itself. */
+  const display = (field: string, value: unknown) => {
+    const byId = labels[field]
+    if (byId && typeof value === 'string') return byId[value] ?? value
+    if (typeof value === 'boolean') return value ? 'Yes' : 'No'
+    if (value === null || value === undefined || value === '') return '—'
+    return String(value)
+  }
+
+  const remove = async (id: string) => {
+    setBusy(id)
+    const result = await submit(resource, 'delete', { id })
+    setBusy(null)
+    setConfirming(null)
+    if (!result.ok) {
+      /**
+       * A refused delete is shown here AND told to the agent. The API refuses
+       * one that would strand a reference — "still owns a project" — and that
+       * is a sentence the person needs, not a row that quietly stayed put.
+       */
+      setProblem(result.message)
+    } else {
+      setProblem(null)
+      setGeneration((n) => n + 1)
+    }
+    context.dispatchAction({
+      event: {
+        name: result.ok ? 'record_deleted' : 'delete_refused',
+        context: { resource, id, ...(result.ok ? {} : { reason: result.message }) },
+      },
+    })
+  }
+
+  /**
+   * Edit hands back to the agent rather than rendering a form itself.
+   *
+   * A renderer cannot invent a surface the agent did not describe, and it
+   * should not want to: the agent knows the schema, so it can draw the right
+   * form with `load` pointing at this row. The button says what happened and
+   * lets the thing that knows how to draw, draw.
+   */
+  const edit = (id: string) =>
+    context.dispatchAction({ event: { name: 'edit_requested', context: { resource, id } } })
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{props.title ?? resource}</CardTitle>
+        {rows && (
+          <CardDescription>
+            {rows.length === 1 ? '1 record' : `${rows.length} records`}
+          </CardDescription>
+        )}
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        {problem && (
+          <p role="alert" className="text-destructive text-sm">
+            {problem}
+          </p>
+        )}
+
+        {rows === null && !problem && <p className="text-muted-foreground text-sm">Loading…</p>}
+
+        {rows?.length === 0 && (
+          <p className="text-muted-foreground text-sm">Nothing here yet.</p>
+        )}
+
+        {rows && rows.length > 0 && (
+          // Wide tables scroll inside their own box rather than pushing the
+          // conversation sideways.
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  {columns.map((column) => (
+                    <TableHead key={column.field}>{column.label}</TableHead>
+                  ))}
+                  {showActions && <TableHead className="w-px text-right">Actions</TableHead>}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((row, index) => {
+                  const id = typeof row.id === 'string' ? row.id : String(index)
+                  return (
+                    <TableRow key={id}>
+                      {columns.map((column) => (
+                        <TableCell key={column.field}>
+                          {display(column.field, row[column.field])}
+                        </TableCell>
+                      ))}
+                      {showActions && (
+                        <TableCell className="text-right whitespace-nowrap">
+                          <Button variant="ghost" size="sm" onClick={() => edit(id)}>
+                            Edit
+                          </Button>
+                          {/*
+                            Two presses, not a dialog. Delete cannot be undone —
+                            the records live in memory — and a button that removes
+                            a row on one click, in a chat, is the wrong default.
+                          */}
+                          <Button
+                            variant={confirming === id ? 'destructive' : 'ghost'}
+                            size="sm"
+                            disabled={busy === id}
+                            onClick={() => (confirming === id ? remove(id) : setConfirming(id))}
+                            onBlur={() => setConfirming((current) => (current === id ? null : current))}
+                          >
+                            {busy === id ? '…' : confirming === id ? 'Sure?' : 'Delete'}
+                          </Button>
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }

@@ -6,6 +6,7 @@ import {
   FormCardRenderer,
   SelectFieldRenderer,
   SubmitButtonRenderer,
+  TableViewRenderer,
   TextFieldRenderer,
   type RenderArgs,
 } from './renderers'
@@ -50,6 +51,7 @@ const renderers = {
   TextField: TextFieldRenderer,
   SelectField: SelectFieldRenderer,
   CheckboxField: CheckboxFieldRenderer,
+  TableView: TableViewRenderer,
   SubmitButton: SubmitButtonRenderer,
 } as const
 

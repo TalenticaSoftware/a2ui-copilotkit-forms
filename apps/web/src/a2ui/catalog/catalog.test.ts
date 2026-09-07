@@ -54,6 +54,28 @@ describe('the catalog matches its definitions', () => {
     expect(Object.keys(shape)).not.toContain('path')
   })
 
+  /**
+   * The table names an operation too. If a `url` or `path` ever appears here,
+   * the agent is transcribing an endpoint — and rows fetched from a plausible
+   * wrong one look exactly like rows fetched from the right one.
+   */
+  test('the table asks for a resource, not a URL, and picks its columns', () => {
+    const shape = definitions.TableView.props.shape as Record<string, any>
+    expect(Object.keys(shape)).toContain('resource')
+    expect(Object.keys(shape)).not.toContain('url')
+    expect(Object.keys(shape)).not.toContain('rows')
+    expect(Object.keys(shape.columns.element.shape).sort()).toEqual(['field', 'label'])
+  })
+
+  /**
+   * Editing must start from the record. A form that can only be told values by
+   * the agent is a form whose contents were typed by a language model.
+   */
+  test('a form can load an existing record by id', () => {
+    const load = (definitions.FormCard.props.shape as Record<string, any>).load
+    expect(Object.keys(load.unwrap().shape).sort()).toEqual(['id', 'resource'])
+  })
+
   test('the container takes children by id, never inline', () => {
     const description = String(definitions.FormCard.props.shape.children.description)
     expect(description.toLowerCase()).toContain('inline')

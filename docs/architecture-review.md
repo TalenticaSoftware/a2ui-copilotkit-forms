@@ -100,6 +100,25 @@ dispatched event so the agent cannot narrate a save.
 `users.test.ts` tests `describeUsers()` and never mounts the router. The newest
 and most intricate code is the untested code.
 
+## A5 — A table does not know when something else changed a row
+
+**Severity: low, and visible. Introduced with `TableView`.**
+
+The table re-reads after its own delete. It does not hear about an edit made in
+a form beside it, so after an update the row on screen still shows the old
+value until the person asks for the list again.
+
+Each A2UI component is isolated: the submit button dispatches `save_succeeded`
+to the AGENT, and there is no path from there back to a sibling renderer. The
+shared data model carries form values, not a notification that a resource
+changed.
+
+**Direction:** either a small revision counter in the data model that writers
+bump and tables watch, or have the agent render a fresh table after a save. The
+first keeps it in the browser, which is where the rest of this belongs.
+
+Recorded rather than bodged: the wrong fix is a table that polls.
+
 ---
 
 ## Lower severity, recorded so they are not rediscovered
