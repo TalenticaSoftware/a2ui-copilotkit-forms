@@ -3,7 +3,7 @@ import { useAgent, useAgentContext } from '@copilotkit/react-core/v2'
 import { CATALOG_ID } from '@/a2ui/catalog/definitions'
 
 /**
- * Which turn is the live one.
+ * Which surface is the live one.
  *
  * A conversation keeps every surface it has ever drawn. Without this, a table
  * from six turns ago still has working Delete buttons, and a form from before
@@ -11,16 +11,29 @@ import { CATALOG_ID } from '@/a2ui/catalog/definitions'
  * otherwise. Acting on a stale surface is not a mis-click, it is doing the
  * right thing to the wrong version of the world.
  *
- * The turn number comes from the agent's own run lifecycle rather than from
- * counting messages: a run is the unit that produces a surface, so a surface
- * belongs to exactly one.
+ * Counted by SURFACE, not by agent turn, and the difference matters. Turn-based
+ * counting disabled a form the moment the agent said anything at all — including
+ * "the email address is invalid", which is precisely when the person needs to
+ * correct it and press the button again. They were left with a dead form and no
+ * way back except asking for a new one, losing everything they had typed.
+ *
+ * A surface is superseded when a LATER surface exists, which is what "out of
+ * date" actually means. Words about a form do not replace it.
  */
 
-const TurnContext = createContext(0)
+const TurnContext = createContext<{ latest: number; announce: (n: number) => void }>({
+  latest: 0,
+  announce: () => {},
+})
+
+/** Descendants of a surface share its verdict rather than claiming their own. */
+const StaleContext = createContext(false)
+
+let sequence = 0
 
 export function TurnProvider({ children }: { children: ReactNode }) {
   const { agent } = useAgent()
-  const [turn, setTurn] = useState(0)
+  const [latest, setLatest] = useState(0)
 
   /**
    * Say the catalog id again, plainly.
@@ -43,27 +56,36 @@ export function TurnProvider({ children }: { children: ReactNode }) {
     value: { catalogId: CATALOG_ID },
   })
 
+  // Kept only so a reconnect resets nothing; the count itself is per surface.
   useEffect(() => {
-    const subscription = agent.subscribe({
-      onRunStartedEvent: () => setTurn((current) => current + 1),
-    })
+    const subscription = agent.subscribe({})
     return () => subscription?.unsubscribe?.()
   }, [agent])
 
-  return <TurnContext.Provider value={turn}>{children}</TurnContext.Provider>
+  const announce = (n: number) => setLatest((current) => (n > current ? n : current))
+
+  return <TurnContext.Provider value={{ latest, announce }}>{children}</TurnContext.Provider>
 }
 
 /**
- * True while the component belongs to the newest turn.
+ * Claim a place in the order, and report whether anything newer exists.
  *
- * Captured once at mount, deliberately: the value is "which turn was running
- * when this was drawn", and that never changes for a given surface. Comparing
- * it to the live turn is what goes stale.
+ * Called by the components that ARE a surface — a card, a table — and once
+ * each. Its descendants read `useStale` instead, so a submit button inside a
+ * form shares that form's fate rather than counting as a surface of its own.
  */
-export function useIsCurrentTurn(): boolean {
-  const turn = useContext(TurnContext)
-  const [mountedAt] = useState(turn)
-  return mountedAt === turn
+export function useSurface(): boolean {
+  const { latest, announce } = useContext(TurnContext)
+  const [mine] = useState(() => (sequence += 1))
+  useEffect(() => announce(mine), [mine, announce])
+  return mine < latest
+}
+
+/** Whether the surface this component sits inside has been superseded. */
+export const useStale = () => useContext(StaleContext)
+
+export function StaleProvider({ stale, children }: { stale: boolean; children: ReactNode }) {
+  return <StaleContext.Provider value={stale}>{children}</StaleContext.Provider>
 }
 
 /**

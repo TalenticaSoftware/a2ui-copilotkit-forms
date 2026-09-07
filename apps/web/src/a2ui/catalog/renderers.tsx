@@ -24,7 +24,7 @@ import {
 } from '@/components/ui/table'
 import { describeResource, labelsFor, read, submit, type SubmitResult } from '@/lib/api'
 import { useAgentContext } from '@copilotkit/react-core/v2'
-import { useIsCurrentTurn, staleClass } from '@/a2ui/turn'
+import { StaleProvider, staleClass, useStale, useSurface } from '@/a2ui/turn'
 import { useAsk } from '@/a2ui/ask'
 import { recallFocus, rememberFocus } from '@/a2ui/focus'
 
@@ -216,7 +216,7 @@ export function FormCardRenderer({ props, context, buildChild }: RenderArgs<any>
    */
   const [failed, setFailed] = useState<string | null>(null)
   const saved = useModelValue(context, SAVED)
-  const stale = !useIsCurrentTurn()
+  const stale = useSurface()
   const dataContext = context.dataContext
   useEffect(() => {
     if (!resource || !id) return
@@ -252,25 +252,45 @@ export function FormCardRenderer({ props, context, buildChild }: RenderArgs<any>
     )
   }
 
+  /**
+   * A record that could not be read is not a form to fill in.
+   *
+   * Asked to edit something that does not exist, the agent still draws the
+   * form, and the load fails underneath it: empty inputs, a red line, and a
+   * Save button that would create nothing or overwrite everything. Saying so
+   * plainly is the whole of the useful answer, so the inputs do not appear at
+   * all.
+   *
+   * Not styled as an alarm. Naming a record that is not there is an ordinary
+   * thing to do — usually a typo, or an id the agent invented — and a wall of
+   * red implies something broke.
+   */
+  if (failed) {
+    return (
+      <Card className={SURFACE}>
+        <CardContent className="py-1">
+          <p className="text-muted-foreground text-sm">{failed}</p>
+        </CardContent>
+      </Card>
+    )
+  }
+
   return (
-    <Card className={SURFACE}>
-      <CardHeader>
-        <CardTitle>{props.title}</CardTitle>
-        {props.description && <CardDescription>{props.description}</CardDescription>}
-      </CardHeader>
-      <CardContent className={cn('flex flex-col gap-5', staleClass(stale))}>
-        {failed && (
-          <p role="alert" className="text-destructive text-sm">
-            {failed}
-          </p>
-        )}
-        {children.map((child: any) => {
-          // A2UI hands children either as ids or as { id, basePath } objects.
-          const id = typeof child === 'string' ? child : child?.id
-          return id ? <div key={id}>{buildChild(id)}</div> : null
-        })}
-      </CardContent>
-    </Card>
+    <StaleProvider stale={stale}>
+      <Card className={SURFACE}>
+        <CardHeader>
+          <CardTitle>{props.title}</CardTitle>
+          {props.description && <CardDescription>{props.description}</CardDescription>}
+        </CardHeader>
+        <CardContent className={cn('flex flex-col gap-5', staleClass(stale))}>
+          {children.map((child: any) => {
+            // A2UI hands children either as ids or as { id, basePath } objects.
+            const id = typeof child === 'string' ? child : child?.id
+            return id ? <div key={id}>{buildChild(id)}</div> : null
+          })}
+        </CardContent>
+      </Card>
+    </StaleProvider>
   )
 }
 
@@ -437,7 +457,7 @@ export function CheckboxFieldRenderer({ props, context }: RenderArgs<any>) {
 }
 
 export function SubmitButtonRenderer({ props, context }: RenderArgs<any>) {
-  const stale = !useIsCurrentTurn()
+  const stale = useStale()
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const target: { resource?: string; operation?: string } | undefined = props.submit
@@ -585,7 +605,7 @@ type Row = Record<string, unknown>
  */
 export function TableViewRenderer({ props }: RenderArgs<any>) {
   const ask = useAsk()
-  const stale = !useIsCurrentTurn()
+  const stale = useSurface()
   const resource: string = props.resource
   const columns: Array<{ field: string; label: string }> = Array.isArray(props.columns)
     ? props.columns
@@ -772,7 +792,7 @@ export function TableViewRenderer({ props }: RenderArgs<any>) {
  * destroy anything, it can only ask whether we should.
  */
 export function ConfirmCardRenderer({ props, context }: RenderArgs<any>) {
-  const stale = !useIsCurrentTurn()
+  const stale = useSurface()
   const ask = useAsk()
   const [busy, setBusy] = useState(false)
   const [outcome, setOutcome] = useState<{ ok: boolean; message: string } | null>(null)
@@ -817,9 +837,15 @@ export function ConfirmCardRenderer({ props, context }: RenderArgs<any>) {
     return (
       <Card className={SURFACE}>
         <CardContent className="py-1">
-          <p role="alert" className="text-destructive text-sm">
-            I could not tell which {resource ?? 'record'} that refers to. Ask for the list again,
-            then delete it from there.
+          {/*
+            Muted, not red. Naming a record that is not there is ordinary — a
+            typo, or an id the agent invented — and it destroyed nothing. Red is
+            for something that went wrong, and the users flow gets this right by
+            answering in prose; this should read the same way.
+          */}
+          <p className="text-muted-foreground text-sm">
+            I could not tell which {resource ?? 'record'} that refers to. Ask for the list, then
+            delete it from there.
           </p>
         </CardContent>
       </Card>
@@ -831,7 +857,10 @@ export function ConfirmCardRenderer({ props, context }: RenderArgs<any>) {
       <Card className={SURFACE}>
         <CardContent className="py-1">
           <p
-            className={cn('flex items-center gap-2 text-sm', !outcome.ok && 'text-destructive')}
+            className={cn(
+              'flex items-center gap-2 text-sm',
+              outcome.ok ? 'text-muted-foreground' : 'text-destructive',
+            )}
             role={outcome.ok ? undefined : 'alert'}
           >
             {outcome.ok && <CheckIcon className="size-4 shrink-0" aria-hidden="true" />}
