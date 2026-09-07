@@ -82,7 +82,14 @@ describe('the catalog matches its definitions', () => {
    */
   test('the confirm card names a record, and the agent cannot skip it', () => {
     const shape = definitions.ConfirmCard.props.shape as Record<string, any>
-    expect(Object.keys(shape).sort()).toEqual(['confirmLabel', 'id', 'message', 'resource', 'title'])
+    expect(Object.keys(shape).sort()).toEqual([
+      'confirmLabel',
+      'id',
+      'label',
+      'message',
+      'resource',
+      'title',
+    ])
   })
 
   test('the container takes children by id, never inline', () => {

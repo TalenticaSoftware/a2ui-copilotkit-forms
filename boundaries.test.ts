@@ -39,10 +39,39 @@ function sourceFiles(dir: string): string[] {
   return found
 }
 
-/** Every module specifier in a file, from static imports and `export … from`. */
+/**
+ * Every module specifier in a file, from static imports and `export … from`.
+ *
+ * Read line by line rather than by one regex over the source, and that is not
+ * fussiness. Matching a bare `from '…'` anywhere also matches PROSE — a
+ * component description reading "an enum from " + "the schema" parses as an
+ * import of " + " and fails the suite over a sentence. Widening the pattern to
+ * a whole statement does not help either: this codebase writes no semicolons,
+ * so "up to the next `;`" is "the rest of the file".
+ *
+ * A line that starts an import, or closes a multi-line one, is unambiguous.
+ */
 function importsOf(file: string): string[] {
-  const source = readFileSync(file, 'utf8')
-  return [...source.matchAll(/(?:from|import)\s*['"]([^'"]+)['"]/g)].map((match) => match[1]!)
+  const found: string[] = []
+  for (const line of readFileSync(file, 'utf8').split('\n')) {
+    if (!/^\s*(?:import|export|\})/.test(line)) continue
+
+    // `import x from 'y'`, `export { x } from 'y'`, or a multi-line `} from 'y'`.
+    const viaFrom = line.match(/\sfrom\s*['"]([^'"]+)['"]/)
+    if (viaFrom) {
+      found.push(viaFrom[1]!)
+      continue
+    }
+
+    /*
+      `import 'y'` — a side effect, no bindings and no `from`. Matched only when
+      the line IS the import: `export const json = … 'none'` also starts with a
+      keyword, and reading its last string made 'none' look like a package.
+    */
+    const sideEffect = line.match(/^\s*import\s*['"]([^'"]+)['"]/)
+    if (sideEffect) found.push(sideEffect[1]!)
+  }
+  return found
 }
 
 /** Just the package name: "@scope/pkg/deep" → "@scope/pkg", "node:fs" → "node:fs". */

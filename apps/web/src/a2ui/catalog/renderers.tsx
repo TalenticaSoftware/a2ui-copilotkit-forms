@@ -26,6 +26,7 @@ import { describeResource, labelsFor, read, submit, type SubmitResult } from '@/
 import { useAgentContext } from '@copilotkit/react-core/v2'
 import { useIsCurrentTurn, staleClass } from '@/a2ui/turn'
 import { useAsk } from '@/a2ui/ask'
+import { recallFocus, rememberFocus } from '@/a2ui/focus'
 
 /**
  * shadcn, drawn from A2UI component nodes.
@@ -203,7 +204,7 @@ function Field({
 export function FormCardRenderer({ props, context, buildChild }: RenderArgs<any>) {
   const children: string[] = Array.isArray(props.children) ? props.children : []
   const resource: string | undefined = props.load?.resource
-  const id: string | undefined = props.load?.id
+  const id: string | undefined = props.load?.id ?? recallFocus(resource)?.id
 
   /**
    * Editing starts from the record, not from a blank form.
@@ -231,6 +232,26 @@ export function FormCardRenderer({ props, context, buildChild }: RenderArgs<any>
       cancelled = true
     }
   }, [resource, id, dataContext])
+  /**
+   * A finished save is a sentence, not a card with a heading.
+   *
+   * "Edit User / Update details for Ada Okonkwo" describes a form, and once the
+   * form is gone it describes nothing — a title over a one-line confirmation
+   * reads as though there is still something to do.
+   */
+  if (saved) {
+    return (
+      <Card className={SURFACE}>
+        <CardContent className={cn('py-1', staleClass(stale))}>
+          <p className="text-muted-foreground flex items-center gap-2 text-sm">
+            <CheckIcon className="text-foreground size-4 shrink-0" aria-hidden="true" />
+            {saved}
+          </p>
+        </CardContent>
+      </Card>
+    )
+  }
+
   return (
     <Card className={SURFACE}>
       <CardHeader>
@@ -243,24 +264,11 @@ export function FormCardRenderer({ props, context, buildChild }: RenderArgs<any>
             {failed}
           </p>
         )}
-        {/*
-          Once it has saved, it stops being a form.
-          Leaving the inputs behind would leave a card that still looks
-          editable and no longer means anything — and scrolling back through a
-          conversation, a stale form reads as work that was never finished.
-        */}
-        {saved ? (
-          <p className="text-muted-foreground flex items-center gap-2 text-sm">
-            <CheckIcon className="text-foreground size-4 shrink-0" aria-hidden="true" />
-            {saved}
-          </p>
-        ) : (
-          children.map((child: any) => {
-            // A2UI hands children either as ids or as { id, basePath } objects.
-            const id = typeof child === 'string' ? child : child?.id
-            return id ? <div key={id}>{buildChild(id)}</div> : null
-          })
-        )}
+        {children.map((child: any) => {
+          // A2UI hands children either as ids or as { id, basePath } objects.
+          const id = typeof child === 'string' ? child : child?.id
+          return id ? <div key={id}>{buildChild(id)}</div> : null
+        })}
       </CardContent>
     </Card>
   )
@@ -327,7 +335,48 @@ export function SelectFieldRenderer({ props, context }: RenderArgs<any>) {
   const id = `a2ui-${path ?? props.label}`
   const serverError = useServerError(context, path)
   const error = errorOf(props) ?? serverError
-  const options: Array<{ value: string; label: string }> = props.options ?? []
+
+  /**
+   * Choices fetched, when the field holds another resource's id.
+   *
+   * The label to show comes from that resource's own descriptor —
+   * `references[property].label` on the resource we belong to — so this needs no
+   * idea of what a user or a project is. Failing soft: no choices is an empty
+   * dropdown, which is honest, where inventing one would not be.
+   */
+  const from: string | undefined = props.optionsFrom?.resource
+  const [fetched, setFetched] = useState<Array<{ value: string; label: string }> | null>(null)
+
+  useEffect(() => {
+    if (!from) return
+    let cancelled = false
+    Promise.all([read(from, 'list'), describeResource(from).catch(() => null)]).then(
+      ([listed, descriptor]) => {
+        if (cancelled || !listed.ok || !Array.isArray(listed.data)) return
+        /**
+         * Which field reads as the record's name. The referenced resource does
+         * not say, so this takes the first string that is not an identifier —
+         * the same rule the saved-confirmation uses, for the same reason.
+         */
+        const rows = listed.data as Array<Record<string, unknown>>
+        const naming =
+          Object.keys(rows[0] ?? {}).find(
+            (key) => key !== 'id' && !/Id$/.test(key) && typeof rows[0]?.[key] === 'string',
+          ) ?? 'id'
+        void descriptor
+        setFetched(
+          rows.map((row) => ({ value: String(row.id), label: String(row[naming] ?? row.id) })),
+        )
+      },
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [from])
+
+  const options: Array<{ value: string; label: string }> = from
+    ? (fetched ?? [])
+    : (props.options ?? [])
 
   return (
     <Field label={props.label} required={props.required} error={error} htmlFor={id}>
@@ -621,8 +670,14 @@ export function TableViewRenderer({ props }: RenderArgs<any>) {
     return label && label !== '—' ? label : id
   }
 
-  const edit = (row: Row, id: string) => ask(`Edit ${nameOf(row, id)}`)
-  const remove = (row: Row, id: string) => ask(`Delete ${nameOf(row, id)}`)
+  const act = (verb: string) => (row: Row, id: string) => {
+    const label = nameOf(row, id)
+    rememberFocus({ resource, id, label })
+    ask(`${verb} ${label}`)
+  }
+
+  const edit = act('Edit')
+  const remove = act('Delete')
 
   return (
     <Card className={SURFACE}>
@@ -723,7 +778,9 @@ export function ConfirmCardRenderer({ props, context }: RenderArgs<any>) {
   const [outcome, setOutcome] = useState<{ ok: boolean; message: string } | null>(null)
 
   const resource: string = props.resource
-  const id: string = props.id
+  const focus = recallFocus(resource)
+  const id: string | undefined = props.id ?? focus?.id
+  const label: string | undefined = props.label ?? focus?.label
 
   const confirm = async () => {
     setBusy(true)
@@ -731,7 +788,7 @@ export function ConfirmCardRenderer({ props, context }: RenderArgs<any>) {
     setBusy(false)
     setOutcome({
       ok: result.ok,
-      message: result.ok ? 'Deleted.' : result.message,
+      message: result.ok ? `Deleted — ${label ?? id}.` : result.message,
     })
     /**
      * The agent is told either way, and a refusal matters more than a success:
@@ -746,10 +803,33 @@ export function ConfirmCardRenderer({ props, context }: RenderArgs<any>) {
     })
   }
 
+  /**
+   * No id, no button.
+   *
+   * The injected tool validates nothing (F24), so a required prop is a request
+   * rather than a guarantee, and a card drawn without an id used to render a
+   * Delete that could only fail — with "This needs id to know which projects
+   * record to change", which is a sentence about our plumbing, not about the
+   * person's problem. Better to say plainly that we do not know which record,
+   * and offer nothing to press.
+   */
+  if (!id) {
+    return (
+      <Card className={SURFACE}>
+        <CardContent className="py-1">
+          <p role="alert" className="text-destructive text-sm">
+            I could not tell which {resource ?? 'record'} that refers to. Ask for the list again,
+            then delete it from there.
+          </p>
+        </CardContent>
+      </Card>
+    )
+  }
+
   if (outcome) {
     return (
       <Card className={SURFACE}>
-        <CardContent className="pt-6">
+        <CardContent className="py-1">
           <p
             className={cn('flex items-center gap-2 text-sm', !outcome.ok && 'text-destructive')}
             role={outcome.ok ? undefined : 'alert'}

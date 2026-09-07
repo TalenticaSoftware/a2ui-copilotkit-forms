@@ -134,13 +134,34 @@ export const definitions = {
   },
 
   SelectField: {
-    description: 'A labelled dropdown. One choice from a short list of real options.',
+    description:
+      'A labelled dropdown. Give it `options` for a fixed list — an enum from ' +
+      'the schema — or `optionsFrom` when the field holds another resource\'s ' +
+      'id, and the browser will fetch the real choices itself.',
     props: z.object({
-      label: z.string(),
+      label: z
+        .string()
+        .describe('What the person reads. Write it for a person: "Owner", never "Owner Id".'),
       value: binding,
       options: z
         .array(z.object({ value: z.string(), label: z.string() }))
-        .describe('The choices. Real ones drawn from the request, never placeholders.'),
+        .optional()
+        .describe('A fixed list, e.g. the values of an enum. Real ones, never placeholders.'),
+      /**
+       * A reference's choices are whichever records exist right now.
+       *
+       * No schema can list them, and the agent must not try: writing them out
+       * means a listing passed through a language model on its way to a
+       * dropdown, stale by the time it is read and wrong if it was imagined.
+       * Naming the resource lets the browser fetch them, and the descriptor's
+       * `references` says which field to show in place of the id.
+       */
+      optionsFrom: z
+        .object({
+          resource: z.string().describe('The resource whose records are the choices, e.g. "users".'),
+        })
+        .optional()
+        .describe('Fill the choices from a resource. Use this for any property holding another record\'s id.'),
       required: z.boolean(),
       checks,
     }),
@@ -198,7 +219,15 @@ export const definitions = {
         .string()
         .describe('What will happen, naming the record. Say if it cannot be undone.'),
       resource: z.string().describe('The resource name, as returned by list_resources.'),
-      id: z.string().describe('Which record to remove.'),
+      id: z
+        .string()
+        .describe(
+          'REQUIRED. The id of the record to remove. You have it from the list ' +
+            'on screen — never draw this card without one.',
+        ),
+      label: z
+        .string()
+        .describe('The record\'s name, for the confirmation afterwards, e.g. "Website refresh".'),
       confirmLabel: z
         .string()
         .optional()

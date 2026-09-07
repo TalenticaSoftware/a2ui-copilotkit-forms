@@ -110,7 +110,7 @@ export async function submit(
   if (missing.length > 0) {
     return {
       ok: false,
-      message: `This needs ${missing.join(' and ')} to know which ${resource} record to change.`,
+      message: `I could not tell which ${resource} record that refers to — no ${missing.join(' or ')} was given.`,
       fields: {},
     }
   }

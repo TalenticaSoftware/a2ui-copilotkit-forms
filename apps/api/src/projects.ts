@@ -17,7 +17,14 @@ export const createProjectSchema = z.object({
   status: z
     .enum(['planning', 'active', 'paused', 'done'])
     .describe('Where the project has got to.'),
-  ownerId: z.string().describe('The user who owns this project. Must be an existing user id.'),
+  /**
+   * Described as a person, not as an id.
+   *
+   * The label on screen is written from this sentence, and "Must be an existing
+   * user id" produced "Owner Id" — a field about our storage rather than about
+   * the person's choice. What is STORED is still an id; `references` says so.
+   */
+  ownerId: z.string().describe('Who owns this project.'),
 })
 
 export const projects = collection({
