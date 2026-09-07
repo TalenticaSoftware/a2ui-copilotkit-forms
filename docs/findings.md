@@ -890,3 +890,64 @@ route up in the descriptor.
 
 Which is the deployment question answered: three repositories, one HTTP
 contract, no shared package.
+
+---
+
+## F31 — A quota failure renders as a permanent loading skeleton `[hit]`
+
+Gemini's free tier refused a run with HTTP 429. The chat showed
+"Building interface · ~52 tokens" and kept showing it, indefinitely. Nothing in
+the conversation said the run had failed.
+
+The error was not swallowed — it reached the browser, as a `console.error`:
+
+```
+[CopilotKit] Error (agent_run_error_event): Failed after 3 attempts.
+Last error: You exceeded your current quota …
+* Quota exceeded for metric:
+  generativelanguage.googleapis.com/generate_content_free_tier_requests,
+  limit: 20, model: gemini-3.6-flash
+{"runtimeErrorCode":"INCOMPLETE_STREAM","agentId":"default"}
+```
+
+So the runtime knew, the client knew, and the only surface that did not say so
+was the one a person was looking at. `recovery: { debugExposure: 'verbose' }`
+was set and changed nothing here.
+
+This is the same failure shape as F2 and F9, and the worst one in the catalogue
+because it does not look like a failure. A spinner is a promise that something
+is still happening. Reproduce: exhaust the free tier, then send any message.
+
+**Consequence for anyone building on this:** an `INCOMPLETE_STREAM` needs
+handling in the client explicitly. Do not assume a failed run tells the person.
+
+## F32 — A completed A2UI render that painted nothing `[hit, unexplained]`
+
+Recorded because it is unresolved, not because it is understood.
+
+One run streamed cleanly to the end — captured by teeing `fetch` in the page:
+
+```
+RUN_STARTED
+TOOL_CALL_* ×2        list_resources, describe_resource   → results
+ACTIVITY_SNAPSHOT
+TOOL_CALL_* (render_a2ui) → {"status":"rendered"}
+RUN_FINISHED
+```
+
+The payload matched the injected tool's documented contract — flat component
+format, root component with `id: "root"`, which is what
+`@ag-ui/a2ui-middleware` 0.0.10 asks for and what `web_core`'s
+`processUpdateComponentsMessage` consumes (`const { id, component,
+...properties } = comp`). The catalog had the component registered — checked
+live: `catalog.components` is a `Map` of 6, including the one requested. The
+console carried no error. And the component never mounted: its renderer fetches
+on mount, and the backend logged no such request.
+
+So: valid payload, registered component, no error, `"rendered"`, nothing drawn.
+
+Not attributable to the quota exhaustion in F31 — that run terminated with
+`RUN_ERROR` and no tool result, a different signature. Investigation stopped
+when the free tier ran out. Whoever picks this up: tee the run endpoint's
+response body in the page, and compare a working render's payload against this
+one field by field.
