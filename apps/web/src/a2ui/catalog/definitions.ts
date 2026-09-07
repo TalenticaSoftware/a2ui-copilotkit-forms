@@ -219,11 +219,21 @@ export const definitions = {
         .string()
         .describe('What will happen, naming the record. Say if it cannot be undone.'),
       resource: z.string().describe('The resource name, as returned by list_resources.'),
-      id: z
+      /**
+       * NOT `id`, and that is not a style choice.
+       *
+       * `id` is A2UI's own component identifier: its processor destructures
+       * every node as `{ id, component, ...properties }`, so a prop called `id`
+       * is eaten before a renderer ever sees it. The record id became the
+       * COMPONENT id, `props.id` arrived undefined, and the parent's reference
+       * to its child pointed at a component that had renamed itself — a
+       * dangling tree that draws nothing and still answers "rendered" (F35).
+       */
+      recordId: z
         .string()
         .describe(
-          'REQUIRED. The id of the record to remove. You have it from the list ' +
-            'on screen — never draw this card without one.',
+          'REQUIRED. The id of the record to remove — NOT the component id. ' +
+            'You have it from the list on screen; never draw this card without one.',
         ),
       label: z
         .string()

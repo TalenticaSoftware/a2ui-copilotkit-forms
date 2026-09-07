@@ -84,12 +84,31 @@ describe('the catalog matches its definitions', () => {
     const shape = definitions.ConfirmCard.props.shape as Record<string, any>
     expect(Object.keys(shape).sort()).toEqual([
       'confirmLabel',
-      'id',
       'label',
       'message',
+      'recordId',
       'resource',
       'title',
     ])
+  })
+
+  /**
+   * `id` belongs to A2UI, not to us.
+   *
+   * Its processor reads every node as `{ id, component, ...properties }`, so a
+   * prop named `id` never reaches a renderer — it is taken as the COMPONENT's
+   * identity instead. A card declaring one draws nothing, reports success, and
+   * leaves its parent pointing at a child that renamed itself (F35). The names
+   * are reserved for the whole catalog, so this checks the whole catalog.
+   */
+  test('no component claims a prop name A2UI reserves for itself', () => {
+    const reserved = ['id', 'component']
+    const clashes = Object.entries(definitions).flatMap(([name, definition]) =>
+      Object.keys(definition.props.shape)
+        .filter((prop) => reserved.includes(prop))
+        .map((prop) => `${name}.${prop}`),
+    )
+    expect(clashes).toEqual([])
   })
 
   test('the container takes children by id, never inline', () => {

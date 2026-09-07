@@ -1003,3 +1003,38 @@ Worth knowing: it cannot be fixed by dropping the overflow on one axis, because
 `overflow-x: visible` with `overflow-y: auto` computes back to `auto`. Either
 give the surface a horizontal inset, or lose vertical scrolling. A 2px margin on
 our own card is the smaller intervention and depends on none of their DOM.
+
+---
+
+## F35 — `id` is A2UI's, and a prop by that name is eaten silently `[hit]`
+
+A component declaring a prop called `id` never receives it. `web_core`'s
+processor reads every node as the component's identity plus everything else:
+
+```js
+const { id, component, ...properties } = comp
+```
+
+So our ConfirmCard's `id` — which record to delete — became the COMPONENT's id.
+Three things then happened at once, none of them an error:
+
+1. `props.id` arrived `undefined`, so the card could not name a record.
+2. The component registered itself under the record's id, `"project_1"`.
+3. Its parent's `children: ["confirm_card"]` pointed at a component that no
+   longer existed, leaving a dangling tree.
+
+The surface drew nothing at all — a loading skeleton that never resolved — and
+the injected tool answered `{"status":"rendered"}`. Captured by teeing the run
+endpoint's response body in the page: `RUN_STARTED`, both discovery tools,
+`render_a2ui` → `"rendered"`, `RUN_FINISHED`, and a blank conversation.
+
+Reproduce: give any custom component a prop named `id` and reference it from a
+parent's `children`.
+
+The A2UI spec documents `id` as a component field. What is undocumented is that
+a catalog schema may declare the same name without complaint from either side —
+`createReactComponent` accepts it, the injected tool accepts it, and nothing
+warns. `component` collides the same way.
+
+**Consequence:** reserve `id` and `component` in any custom catalog. Ours is now
+`recordId`, and a test asserts no component in the catalog claims either name.

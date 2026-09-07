@@ -799,7 +799,7 @@ export function ConfirmCardRenderer({ props, context }: RenderArgs<any>) {
 
   const resource: string = props.resource
   const focus = recallFocus(resource)
-  const id: string | undefined = props.id ?? focus?.id
+  const id: string | undefined = props.recordId ?? focus?.id
   const label: string | undefined = props.label ?? focus?.label
 
   const confirm = async () => {
