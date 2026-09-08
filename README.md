@@ -59,6 +59,7 @@ Start with **[docs/scope.md](docs/scope.md)** — what this set out to answer.
 
 | | |
 | --- | --- |
+| [demo.md](docs/demo.md) | A three-minute walkthrough, with the talk track |
 | [scope.md](docs/scope.md) | The question, and what is in and out of scope |
 | [tech-stack.md](docs/tech-stack.md) | The three apps and every library choice |
 | [findings.md](docs/findings.md) | What these libraries actually do |
