@@ -8,7 +8,7 @@
     "boundaries": "tsx scripts/check-boundaries.ts",
     "build": "pnpm --filter @a2ui-copilotkit-forms/web build",
     "check": "pnpm typecheck && pnpm lint && pnpm boundaries",
-    "dev:all": "concurrently -k -n web,runtime,api -c cyan,magenta,green \"pnpm dev:web\" \"pnpm dev:runtime\" \"pnpm dev:api\"",
+    "dev:all": "concurrently -k -n api,runtime,web -c green,magenta,cyan \"pnpm dev:api\" \"pnpm dev:runtime\" \"sh -c 'sleep 3 && pnpm dev:web'\"",
     "dev:api": "pnpm --filter @a2ui-copilotkit-forms/api dev",
     "dev:runtime": "pnpm --filter @a2ui-copilotkit-forms/runtime dev",
     "dev:web": "pnpm --filter @a2ui-copilotkit-forms/web dev",
