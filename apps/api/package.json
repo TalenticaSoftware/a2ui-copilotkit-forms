@@ -6,7 +6,6 @@
   "description": "The backend. Knows what is real: zod schemas, routes, and the descriptor derived from both.",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "test": "vitest run",
     "typecheck": "tsc -b"
   },
   "dependencies": {

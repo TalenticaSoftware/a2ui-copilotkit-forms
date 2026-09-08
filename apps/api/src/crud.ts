@@ -9,17 +9,9 @@ import {
 } from './describe'
 
 /**
- * One schema in, five routes and their descriptions out.
- *
- * Every resource here is the same shape of thing: a collection you can list,
- * read, create, change and remove. Writing that out per resource would be sixty
- * lines of duplication whose only interesting part is the schema — and the
- * point of this project is that the schema is the only interesting part.
- *
- * More importantly it keeps the DESCRIPTOR derived. A hand-written descriptor
- * per resource is a second declaration that drifts from the routes beside it,
- * which is the exact failure this whole design exists to avoid. Here the routes
- * and their published description come from one call.
+ * One schema in, five routes and their descriptions out. Keeping the descriptor
+ * derived is the point: a hand-written one drifts from the routes beside it,
+ * which is the exact failure this design exists to avoid.
  */
 
 /** What a stored record looks like: the schema's fields, plus an id. */
@@ -32,14 +24,7 @@ export type Collection = {
   /** Read access for other resources, so a reference can be checked. */
   all: () => Stored[]
   has: (id: string) => boolean
-  /**
-   * Register a reason a record may not be removed, returning the reason or null.
-   *
-   * Registered rather than configured because the rule is about ANOTHER
-   * resource — projects reference users, so the check needs both, and having
-   * each import the other is a cycle. The composition root knows both and wires
-   * it there.
-   */
+  /** Register a reason a record may not be removed. Wired from the composition root, which knows both resources. */
   guardDelete: (guard: (record: Stored) => string | null) => void
 }
 
@@ -62,13 +47,7 @@ type Config<S extends z.ZodObject<z.ZodRawShape>> = {
   seed?: Array<z.input<S>>
 }
 
-/**
- * Field-keyed errors, not a sentence.
- *
- * The client puts these back on the inputs they belong to, so the shape has to
- * be addressable. A flat "Validation failed" string would force the form to
- * show a banner and leave the person hunting for which box is wrong.
- */
+/** Field-keyed errors, so the client can put each one back on the input it belongs to. */
 function fieldErrors(error: z.ZodError): Record<string, string> {
   const fields: Record<string, string> = {}
   for (const issue of error.issues) {
@@ -187,11 +166,7 @@ export function collection<S extends z.ZodObject<z.ZodRawShape>>(config: Config<
     }
 
     const updated = { ...records[index]!, ...(parsed.data as Record<string, unknown>) } as Stored
-    /**
-     * Checked against everything EXCEPT itself. A record that keeps its own
-     * email is not in conflict with itself, and reporting that it is would make
-     * every edit fail on a field nobody touched.
-     */
+    // Everything except itself: a record keeping its own email is not a conflict.
     const others = records.filter((_, position) => position !== index)
     const conflicts = validate?.(updated, others)
     if (conflicts) {
@@ -206,13 +181,7 @@ export function collection<S extends z.ZodObject<z.ZodRawShape>>(config: Config<
     const index = records.findIndex((candidate) => candidate.id === request.params.id)
     if (index === -1) return response.status(404).json(missing(String(request.params.id)))
 
-    /**
-     * A delete that strands a reference elsewhere is refused, not cascaded.
-     *
-     * Cascading would remove records the person never named, from a chat, with
-     * no undo. Refusing costs them one extra step and tells them what is in the
-     * way; the other way round they find out later, if at all.
-     */
+    // Refused, not cascaded: removing records nobody named, from a chat, with no undo.
     for (const guard of deleteGuards) {
       const reason = guard(records[index]!)
       if (reason) return response.status(409).json({ error: { message: reason } })

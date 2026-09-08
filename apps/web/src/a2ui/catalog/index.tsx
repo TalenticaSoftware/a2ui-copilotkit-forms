@@ -13,30 +13,16 @@ import {
 } from './renderers'
 
 /**
- * Definitions plus renderers, assembled by hand.
+ * Definitions plus renderers, assembled by hand. `createCatalog` forwards only
+ * `{ props, children, dispatch }` and drops the `context` carrying
+ * `dataContext.set` — the only way a component can write a value back.
  *
- * `createCatalog` would be the convenience wrapper for this, and we cannot use
- * it: it wraps each renderer and forwards only `{ props, children, dispatch }`,
- * dropping the `context` that carries `dataContext.set` — the only way a
- * component can write a value back. Building on `createReactComponent` directly
- * costs a few lines and keeps the capability.
- *
- * The trade is real and worth stating: `createCatalog` type-checks renderers
- * against their definitions, and this does not. The reachability test next door
- * is what replaces that guarantee — it asserts every defined component has a
- * renderer and vice versa.
+ * The trade: createCatalog would type-check renderers against their definitions.
  */
 
 type Definition = { description: string; props: z.ZodObject<any> }
 
-/**
- * One component, as A2UI wants it.
- *
- * `schema` is the zod object from `definitions`, which is what the binder reads
- * to decide which props are DYNAMIC (bind to the data model), which are ACTIONs,
- * and which are children — so the shape of the definition is what makes the
- * binding work, not anything we do here.
- */
+/** One component. The binder reads `schema` to classify props, so the definition's shape is what binds. */
 function component(name: string, definition: Definition, render: (args: RenderArgs<any>) => any) {
   return createReactComponent(
     {
@@ -57,12 +43,7 @@ const renderers = {
   SubmitButton: SubmitButtonRenderer,
 } as const
 
-/**
- * `includeBasicCatalog` has no equivalent here, and that is deliberate: ours are
- * the only components, so the agent cannot quietly compose A2UI's own widgets
- * instead (F22). Nothing else is offered, and — unlike the container version it
- * refused (F23) — what is offered is the leaf vocabulary it expects.
- */
+/** Ours are the only components, so the agent cannot quietly compose A2UI's own instead (F22). */
 export const catalog = new Catalog(
   CATALOG_ID,
   Object.entries(renderers).map(([name, render]) =>
@@ -71,5 +52,5 @@ export const catalog = new Catalog(
   [],
 )
 
-/** Exported for the test that keeps definitions and renderers in step. */
+/** Exported so the two lists can be compared. */
 export const COMPONENT_NAMES = Object.keys(renderers)

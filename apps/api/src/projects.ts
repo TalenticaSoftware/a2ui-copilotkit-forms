@@ -3,13 +3,9 @@ import { collection } from './crud'
 import { users } from './users'
 
 /**
- * The projects resource, which exists to test one thing users cannot.
- *
- * `ownerId` is a REFERENCE. Every other field in this app is answerable from
- * the schema alone — a string is a string, an enum lists its own values — but
- * the valid owners are whichever users exist at the moment the form is drawn.
- * No schema can state that, which is why `references` is part of the descriptor
- * and why the client fetches the options itself rather than being handed them.
+ * Projects exist to test what users cannot: `ownerId` is a REFERENCE, and its
+ * valid values are whichever users exist when the form is drawn. No schema can
+ * state that, so `references` is part of the descriptor.
  */
 export const createProjectSchema = z.object({
   name: z.string().min(2).max(80).describe('What the project is called.'),
@@ -17,13 +13,7 @@ export const createProjectSchema = z.object({
   status: z
     .enum(['planning', 'active', 'paused', 'done'])
     .describe('Where the project has got to.'),
-  /**
-   * Described as a person, not as an id.
-   *
-   * The label on screen is written from this sentence, and "Must be an existing
-   * user id" produced "Owner Id" — a field about our storage rather than about
-   * the person's choice. What is STORED is still an id; `references` says so.
-   */
+  /** Described as a person, not an id: the label on screen is written from this sentence. */
   ownerId: z.string().describe('Who owns this project.'),
 })
 
@@ -33,19 +23,11 @@ export const projects = collection({
   schema: createProjectSchema,
 
   references: {
-    /**
-     * Stored as an id, shown as a name. Both halves matter: showing the id
-     * makes the form unreadable, and storing the name makes it unjoinable.
-     */
+    // Stored as an id, shown as a name.
     ownerId: { resource: 'users', label: 'fullName' },
   },
 
-  /**
-   * A reference to a user who does not exist is a broken record, and the schema
-   * cannot catch it — `ownerId` is a well-formed string either way. Checked
-   * here, against the other collection, and reported on the field so it lands
-   * on the owner dropdown rather than as a banner.
-   */
+  /** A well-formed string can still name a user who does not exist. */
   validate: (input) =>
     users.has(String(input.ownerId)) ? null : { ownerId: 'That user does not exist.' },
 

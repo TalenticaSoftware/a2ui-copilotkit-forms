@@ -29,24 +29,11 @@ import { useAsk } from '@/a2ui/ask'
 import { recallFocus, rememberFocus } from '@/a2ui/focus'
 
 /**
- * shadcn, drawn from A2UI component nodes.
+ * shadcn components, drawn from A2UI nodes.
  *
- * Each renderer receives three things from A2UI:
- *
- *   props    — resolved by the binder. A `{ path }` binding arrives as its
- *              current VALUE, and validation `checks` arrive evaluated, as
- *              `isValid` and `validationErrors`.
- *   context  — the live surface. `context.dataContext.set(path, value)` is how a
- *              component pushes user input back into the shared data model, and
- *              `context.componentModel.properties` is the RAW node, which is
- *              where the unresolved `{ path }` still lives.
- *   buildChild — renders a child by id, for containers.
- *
- * That `context` is why these use `createReactComponent` directly rather than
- * `createCatalog`: createCatalog wraps each renderer and passes on only
- * `{ props, children, dispatch }`, dropping `context` — and with it every way to
- * write a value. The capability is in the library; its convenience wrapper hides
- * it.
+ *   props      resolved by the binder — a `{ path }` binding arrives as its value
+ *   context    the live surface: `dataContext.set()` writes, `componentModel` is the raw node
+ *   buildChild renders a child by id, for containers
  */
 
 /** What A2UI hands a renderer. Typed loosely because the library's own types are. */
@@ -69,15 +56,7 @@ export type RenderArgs<P> = {
   buildChild: (id: string, basePath?: string) => ReactNode
 }
 
-/**
- * The path a component writes to.
- *
- * `props.value` has already been resolved to the current value, so the binding
- * itself has to come from the raw node. Returning null rather than guessing: a
- * field the agent bound to nothing is a field that cannot store an answer, and
- * silently writing to an invented path would lose the input somewhere nobody
- * looks.
- */
+/** The path a component writes to. `props.value` is resolved, so read the raw node. */
 function pathOf(context: A2UIContext, prop = 'value'): string | null {
   const raw = context.componentModel?.properties?.[prop]
   return typeof raw?.path === 'string' ? raw.path : null
@@ -91,61 +70,26 @@ function errorOf(props: Record<string, any>): string | null {
 }
 
 /**
- * Where a rejection from the server is kept: `/email` fails, `/_errors/email`
- * says why.
- *
- * The submit button is the component that hears the API, and the input is the
- * component that has to show it — they are siblings with no props between them.
- * The data model is the only thing they share, so it carries the message, the
- * same way it carries the answers.
- *
- * Underscored because the model is also the POST body, and `submit` strips this
- * key before sending. A field literally called `_errors` would collide; nothing
- * stops that, and nothing needs to yet.
+ * Server errors, keyed by field: `/email` fails, `/_errors/email` says why.
+ * The button hears the API and the input must show it; the data model is all
+ * they share. Stripped from the body before posting.
  */
 const ERRORS = '/_errors'
 
-/**
- * Where a finished save leaves its confirmation.
- *
- * The button knows the save worked; the card is what has to stop being a form.
- * They are a leaf and its container with no props between them, so the message
- * travels the only way they share — the data model — exactly as field errors
- * do. Underscored, and stripped from the body before posting.
- */
+/** Where a finished save leaves its confirmation, for the card to show instead of inputs. */
 const SAVED = '/_saved'
 
 /**
- * Two pixels, so the card's ring is not shaved off its left edge.
- *
- * CopilotKit renders every A2UI surface inside a scroll viewport — `flex-1
- * min-h-0 overflow-auto` — whose padding is `24px 0px`: vertical only. An
- * `overflow` other than visible clips to the PADDING box, so with no horizontal
- * padding the clip edge and the card's left edge are the same pixel.
- *
- * shadcn's `ring-1` is a box-shadow with 1px spread, which paints OUTSIDE the
- * border box. At zero inset that pixel is outside the clip box, and the card
- * looks sliced down its left side — at rest, with nothing scrolled and nothing
- * overflowing, which is why it reads as a layout bug rather than a scroll one.
- *
- * Fixed from our side rather than by overriding their container: a rule aimed
- * at CopilotKit's DOM would break the day they rename a class, and this cannot.
- * 2px covers the 1px ring and the 1.5px focus outline.
+ * CopilotKit's surface viewport has vertical padding only, and `overflow` clips
+ * to the padding box — so a card at zero inset loses its 1px ring. 2px of margin
+ * fixes it from our side, without depending on their class names.
  */
 const SURFACE = 'm-0.5'
 
 /**
- * The server's complaint about one field, kept current.
- *
- * Subscribed rather than read, because a plain `get` is a snapshot: the value
- * arrives AFTER the person presses submit, and an input that read it at render
- * time would go on looking fine. `subscribeDynamicValue` is the same mechanism
- * the binder uses for bound values, so this re-renders for exactly the reason
- * a typed character does.
- *
- * Callers must invoke this unconditionally and choose afterwards. Written as
- * `errorOf(props) ?? useServerError(...)` it is a conditional hook, skipped
- * whenever a local check already failed.
+ * A value from the data model, kept current. Subscribed rather than read: the
+ * value arrives after submit, and a snapshot would leave the input looking fine.
+ * Call unconditionally — `errorOf(props) ?? useServerError(…)` is a conditional hook.
  */
 function useModelValue(context: A2UIContext, path: string | null): string | null {
   const [message, setMessage] = useState<string | null>(null)
@@ -207,12 +151,8 @@ export function FormCardRenderer({ props, context, buildChild }: RenderArgs<any>
   const id: string | undefined = props.load?.id ?? recallFocus(resource)?.id
 
   /**
-   * Editing starts from the record, not from a blank form.
-   *
-   * Fetched here and written into the data model, so the inputs — which read
-   * that model and know nothing about where it came from — start at the current
-   * values. `/id` is written too: the submit button needs it to fill the `:id`
-   * in the update route.
+   * Editing starts from the record. Fetched here into the data model, so the
+   * inputs start at current values; `/id` goes in too, for the update route.
    */
   const [failed, setFailed] = useState<string | null>(null)
   const saved = useModelValue(context, SAVED)
@@ -232,13 +172,7 @@ export function FormCardRenderer({ props, context, buildChild }: RenderArgs<any>
       cancelled = true
     }
   }, [resource, id, dataContext])
-  /**
-   * A finished save is a sentence, not a card with a heading.
-   *
-   * "Edit User / Update details for Ada Okonkwo" describes a form, and once the
-   * form is gone it describes nothing — a title over a one-line confirmation
-   * reads as though there is still something to do.
-   */
+  /** A finished save is a sentence: the heading described a form that is gone. */
   if (saved) {
     return (
       <Card className={SURFACE}>
@@ -253,17 +187,9 @@ export function FormCardRenderer({ props, context, buildChild }: RenderArgs<any>
   }
 
   /**
-   * A record that could not be read is not a form to fill in.
-   *
-   * Asked to edit something that does not exist, the agent still draws the
-   * form, and the load fails underneath it: empty inputs, a red line, and a
-   * Save button that would create nothing or overwrite everything. Saying so
-   * plainly is the whole of the useful answer, so the inputs do not appear at
-   * all.
-   *
-   * Not styled as an alarm. Naming a record that is not there is an ordinary
-   * thing to do — usually a typo, or an id the agent invented — and a wall of
-   * red implies something broke.
+   * A record that could not be read is not a form to fill in — empty inputs above
+   * a Save that would overwrite everything. Muted, not red: naming a record that
+   * does not exist is ordinary, and nothing broke.
    */
   if (failed) {
     return (
@@ -462,13 +388,7 @@ export function SubmitButtonRenderer({ props, context }: RenderArgs<any>) {
   const [notice, setNotice] = useState<string | null>(null)
   const target: { resource?: string; operation?: string } | undefined = props.submit
 
-  /**
-   * The answers, as a request body.
-   *
-   * `/_errors` is stripped because the data model is shared: it holds what the
-   * person typed AND what the server said about it last time, and only the
-   * first half is the API's business.
-   */
+  /** The answers, as a request body. Our own bookkeeping keys are not the API's business. */
   const values = () => {
     const model = context.dataContext?.dataModel?.get?.('/')
     const { _errors, _saved, ...answers } = (model ?? {}) as Record<string, unknown>
@@ -477,11 +397,7 @@ export function SubmitButtonRenderer({ props, context }: RenderArgs<any>) {
     return answers
   }
 
-  /**
-   * Put the server's complaints where the inputs can see them, and clear the
-   * previous round first — a message left behind from an earlier attempt reads
-   * as a field that is still wrong when it is not.
-   */
+  /** Put complaints where the inputs can see them, clearing the previous round first. */
   const showErrors = (result: SubmitResult, previous: string[]) => {
     for (const field of previous) context.dataContext.set(`${ERRORS}/${field}`, '')
     if (result.ok) return []
@@ -494,21 +410,10 @@ export function SubmitButtonRenderer({ props, context }: RenderArgs<any>) {
   const [shown, setShown] = useState<string[]>([])
 
   /**
-   * The button does the write itself.
-   *
-   * A2UI's own answer to this is `action.functionCall`, which the spec says
-   * runs "immediately on the renderer" — but web_core 0.10.4 ships no function
-   * registry, and its dispatcher only ever emits payloads containing `event`,
-   * so a functionCall action goes nowhere at all. Intercepting instead at
-   * A2UIProvider's `onAction` is possible in principle and not from here:
-   * CopilotKit mounts that provider itself and the prop it exposes to us is
-   * `{ theme, catalog, loadingComponent, sendSchemas }`, with no `onAction`.
-   *
-   * So the interception happens in the one place we already own — this
-   * renderer, which the binder hands both the data model and the raw node. The
-   * person's input reaches the API without passing through a language model,
-   * and no round trip stands between pressing the button and the record being
-   * written.
+   * The button does the write itself. A2UI's `action.functionCall` goes nowhere
+   * (web_core ships no function registry), and CopilotKit mounts A2UIProvider
+   * itself, so `onAction` is out of reach. Input reaches the API without passing
+   * through a language model.
    */
   const save = async (resource: string, operation: string) => {
     setBusy(true)
@@ -519,24 +424,11 @@ export function SubmitButtonRenderer({ props, context }: RenderArgs<any>) {
     setNotice(result.ok ? null : result.message)
     setBusy(false)
 
-    /**
-     * Told to the card, which is what has to stop being a form.
-     *
-     * Named from what was sent rather than from what came back, because the
-     * API decides the record's shape and this has no business knowing which
-     * field is its name.
-     */
+    /** Told to the card, which is what stops being a form. Named from what was sent. */
     if (result.ok) {
       const [named] = Object.entries(sent)
-        /**
-         * Identifiers are not names. An edit carries `/id` in the data model
-         * so the button can fill the `:id` in the route, and taking the first
-         * string in the object found that first — "Saved — user_1." for a
-         * person whose name was sitting two fields further down.
-         *
-         * `*Id` goes too: a reference stores an id and shows a label, so it is
-         * no better a name than `id` itself.
-         */
+        // Identifiers are not names: `/id` rides along for the route, and a
+        // reference stores an id while showing a label.
         .filter(([key]) => key !== 'id' && !/Id$/.test(key))
         .filter(([, value]) => typeof value === 'string' && value.trim().length > 0)
         .map(([, value]) => String(value))
@@ -593,15 +485,9 @@ export function SubmitButtonRenderer({ props, context }: RenderArgs<any>) {
 type Row = Record<string, unknown>
 
 /**
- * A table of what actually exists.
- *
- * The agent decides a table belongs here and which columns to show; the browser
- * fetches the rows. That split matters twice over — a listing of any size stays
- * off the token bill, and nothing on screen can be a record the model invented,
- * which is the failure Second Brain demonstrates at length.
- *
- * `resource` and the operation name, never a URL: same rule as the submit
- * button, for the same reason.
+ * A table of what actually exists. The agent picks the columns; the browser
+ * fetches the rows — so a listing stays off the token bill, and nothing on
+ * screen can be a record the model invented. A resource name, never a URL.
  */
 export function TableViewRenderer({ props }: RenderArgs<any>) {
   const ask = useAsk()
@@ -647,29 +533,12 @@ export function TableViewRenderer({ props }: RenderArgs<any>) {
   }
 
   /**
-   * Both actions ASK, rather than act.
-   *
-   * Pressing Edit or Delete now says so in the conversation and lets the agent
-   * answer — an edit form, or a confirmation card. Nothing destructive happens
-   * from a table row, and nothing appears without the transcript explaining
-   * where it came from.
-   *
-   * The record is named rather than identified: "Delete Bo Lindqvist" is what a
-   * person would say, and the agent already has the id from the same row it is
-   * looking at. The id goes along for the cases where two records read alike.
+   * Both actions ASK rather than act: they say so in the conversation and let the
+   * agent answer. Nothing destructive happens straight from a table row.
    */
   /**
-   * What is on screen, so a NAME is enough to act on.
-   *
-   * The message says "Edit Ada Okonkwo" and never "(user_1)", because an id in
-   * a sentence a person reads is noise. But the agent still has to know which
-   * record that is, and it cannot: it reads schemas, never rows.
-   *
-   * So the ids of the visible rows travel as context — and only the id and the
-   * one column used as a label, not the records. The trade is deliberate and
-   * worth naming: this is the first row data to reach the model at all. It buys
-   * something real beyond tidier text, which is that TYPING "edit Ada Okonkwo"
-   * now works exactly as pressing the button does.
+   * What is on screen, so a name is enough to act on: an id in a sentence a
+   * person reads is noise. Only ids and one label column travel, never records.
    */
   useAgentContext({
     description:
@@ -784,12 +653,8 @@ export function TableViewRenderer({ props }: RenderArgs<any>) {
 }
 
 /**
- * The one place a record gets removed.
- *
- * Drawn by the agent when someone asks to delete something, so the decision
- * lives in the conversation rather than in the corner of a table row. The
- * button still does the work from the browser — the agent has no ability to
- * destroy anything, it can only ask whether we should.
+ * The one place a record gets removed. The agent draws it; the button does the
+ * work. The agent can ask to destroy something, never do it.
  */
 export function ConfirmCardRenderer({ props, context }: RenderArgs<any>) {
   const stale = useSurface()

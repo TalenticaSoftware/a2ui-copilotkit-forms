@@ -2,28 +2,14 @@ import { z } from 'zod'
 import { defineTool } from '@copilotkit/runtime/v2'
 
 /**
- * How the agent finds out what the API accepts.
- *
- * Two tools, and both are pure plumbing: they fetch, they hand the JSON back
- * untouched. Nothing here parses a schema, names a field or decides what a form
- * should contain — the agent reads the descriptor itself, exactly as a person
- * reading the docs would.
- *
- * That is why this file has no types for the payload beyond `unknown`. Giving
- * the runtime a `ResourceDescriptor` interface would mean the runtime knows the
- * API's shape, which is the thing we are trying not to do. It knows one URL.
+ * How the agent finds out what the API accepts. Pure plumbing: fetch, hand the
+ * JSON back untouched. The payload is `unknown` on purpose — a typed descriptor
+ * here would mean the runtime knows the API's shape. It knows one URL.
  */
 
 export const API_URL = process.env.API_URL ?? 'http://localhost:4200'
 
-/**
- * Failures are returned to the agent, not thrown.
- *
- * A thrown tool error ends the run, and the person sees a chat that stopped for
- * no stated reason. Handing back the problem as a value lets the agent say "the
- * API is not answering" — which is both true and actionable, the API being a
- * separate process someone probably forgot to start.
- */
+/** Failures returned, not thrown: a thrown tool error ends the run with nothing said. */
 async function get(path: string): Promise<unknown> {
   let response: Response
   try {
@@ -58,19 +44,11 @@ export const describeResource = defineTool({
 })
 
 /**
- * Names to ids, which is the one thing the agent cannot work out for itself.
+ * Names to ids — the one thing the agent cannot work out for itself, since it
+ * reads schemas and never rows. Without this it invented ids.
  *
- * It reads schemas, never rows, so asked to "edit the Website refresh project"
- * it had nothing to resolve against — and rather than saying so it invented an
- * id, `"1"` or `"website-refresh"`, which the browser dutifully tried to load.
- * Sometimes it admitted defeat instead, so which behaviour you got was luck.
- * This is what a person does: look at the list, find the row, then act on it.
- *
- * Returns ONLY an id and a label, never whole records. The label is chosen
- * structurally — the first string that is not an identifier — so this file
- * still names no field of any resource, and `boundaries.test.ts` still holds.
- * A listing does not belong in a language model's context, and the browser
- * fetches everything it draws for itself.
+ * Returns only an id and a label, never whole records, and picks the label
+ * structurally, so this file still names no field of any resource.
  */
 export const findRecords = defineTool({
   name: 'find_records',

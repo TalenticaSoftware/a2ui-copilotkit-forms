@@ -11,18 +11,11 @@ import { projects } from './projects'
 import type { Collection } from './crud'
 
 /**
- * The backend under test.
+ * The backend. A separate app on a separate port: if any of the three could
+ * import another's schemas, this project would prove nothing.
  *
- * A separate app on a separate port, and that separation is load-bearing rather
- * than tidy-minded. In production the API is a different repository from the
- * agent runtime and from the web client; if any of the three could `import`
- * another's schemas, this project would prove nothing. Over HTTP only. The
- * boundary test next door asserts it stays that way.
- *
- * It is deliberately small and deliberately unauthenticated. Adding a login
- * here would be theatre — there is no principal to authenticate — and pretending
- * otherwise would hide the real question, which is whether a form can be
- * derived from a schema and posted back.
+ * Deliberately unauthenticated — there is no principal to authenticate, and a
+ * login here would be theatre. See docs/verdict.md.
  */
 
 const PORT = Number(process.env.API_PORT ?? 4200)
@@ -31,13 +24,7 @@ const PORT = Number(process.env.API_PORT ?? 4200)
 const COLLECTIONS: Collection[] = [users, projects]
 const BY_NAME = new Map(COLLECTIONS.map((entry) => [entry.name, entry]))
 
-/**
- * Rules that span resources are wired here, where both are in scope.
- *
- * Removing a user who owns a project would leave that project pointing at
- * nobody — the reference check on the way in means nothing if it can be voided
- * on the way out.
- */
+/** Cross-resource rules, wired where both are in scope: a reference checked on the way in can be voided on the way out. */
 users.guardDelete((user) =>
   projects.all().some((project) => project.ownerId === user.id)
     ? 'That person still owns a project. Give it a new owner first.'
@@ -51,12 +38,8 @@ app.use(cors())
 app.use(express.json())
 
 /**
- * Every request, one line.
- *
- * Not decoration. The claim this project makes is that the agent DISCOVERS the
- * schema rather than being told it, and the only way to see that from outside
- * is a log line saying the schema was fetched, mid-run, before any form
- * appeared. Without it the two are indistinguishable.
+ * Every request, one line. The claim is that the agent DISCOVERS the schema, and
+ * a log line mid-run is the only way to see that from outside.
  */
 app.use((request, response, next) => {
   response.on('finish', () =>
@@ -70,13 +53,7 @@ app.get('/api/schema', (_request, response) => {
   response.json({ data: { resources: COLLECTIONS.map((entry) => entry.name) } })
 })
 
-/**
- * One resource, described.
- *
- * `no-store` because a stale descriptor renders a form for an API that has
- * moved on, and a form built from yesterday's schema fails at the last step,
- * after someone has typed everything in.
- */
+/** One resource. `no-store`: a stale descriptor builds a form that fails at the last step. */
 app.get('/api/schema/:resource', (request, response) => {
   const found = BY_NAME.get(String(request.params.resource))
   if (!found) return response.status(404).json({ error: { message: 'No such resource.' } })

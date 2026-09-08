@@ -1,21 +1,15 @@
 # Prompt to form
 
-Say what you want to do — "I want to add a user" — and get a working form,
-drawn with shadcn/ui, whose fields come from the API's own schema. Filling it in
-and pressing the button writes a real record.
+Say what you want to do — *"I want to add a user"* — and an agent reads the
+API's own schema, draws a form from it in **shadcn/ui**, and saves.
 
-Nobody has described that form anywhere. The agent asks the API what it accepts,
-reads the JSON Schema back, and composes the form from it.
+No form is hand-written. Add a field to the backend's zod schema and the form
+grows one, with nothing else edited anywhere.
 
-Built on the stack the wider POC is actually about: **CopilotKit** for the chat
-surface, **AG-UI** for streaming, and **A2UI** for turning the agent's answer
-into components. Portal-Lite next door has exercised CopilotKit heavily; A2UI is
-the gap this app aims at.
+Built on **CopilotKit** (chat + runtime), **AG-UI** (streaming) and **A2UI**
+(turning the agent's answer into components).
 
 ## Running it
-
-Three processes, because there are three parts. One command starts all three,
-each line prefixed with which one said it.
 
 ```bash
 cp .env.example .env      # then add your key
@@ -23,79 +17,55 @@ pnpm install
 pnpm dev:all              # web :5174 · runtime :4100 · backend :4200
 ```
 
-Ctrl-C stops the set. To run one on its own — to read its output without the
-other two interleaved, or to restart just it — `pnpm dev:web`, `pnpm dev:runtime`
-and `pnpm dev:api` do exactly that, as does `pnpm --filter @prompt-to-form/api dev`.
+Open http://localhost:5174 and try:
 
-The server refuses to start on bad configuration rather than failing later on
-the first message — a missing key or an unknown provider is named at startup.
+- `I want to add a user`
+- `Show me the projects`
+- `Edit the Website refresh project`
+- `Delete Bo Lindqvist`
 
-## The three parts
+Watch the `[api]` lines in the terminal — `GET /api/schema/users` appears
+mid-conversation, before any form does. That is the whole claim, visible.
 
-| | | knows |
-|---|---|---|
-| `apps/api` | :4200 | users. Not what a form is. |
-| `apps/runtime` | :4100 | how to run an agent. Not what a user is. |
-| `apps/web` | :5174 | how to draw. Not where anything lives. |
+Storage is in memory; restarting the backend resets it.
 
-They meet only over HTTP — never by import, even though they share a folder
-here. In production they are three repositories, and `boundaries.test.ts` fails
-the build if one reaches into another.
-
-## How a form happens
+## Three apps
 
 ```
-"add a user"
-   -> agent: list_resources, describe_resource        (HTTP, to :4200)
-   -> agent: A2UI tool, composing OUR catalog         (AG-UI stream)
-   -> browser: shadcn components, bound to a data model
-   -> press: browser looks the operation up, POSTs    (HTTP, to :4200)
-   -> agent: says what came back
+apps/web      the browser  :5174   knows how to DRAW   (catalog + renderers)
+apps/runtime  the agent    :4100   knows how to TALK   (agent + its tools)
+apps/api      the backend  :4200   knows what is REAL  (zod schemas + routes)
 ```
 
-Two declarations, each used twice and copied nowhere.
-
-`api/users.ts` holds the zod schema that `POST /api/users` validates against
-**and** that `GET /api/schema/users` publishes. `src/a2ui/catalog/definitions.ts`
-holds the zod schema the renderers are typed against **and** that the browser
-advertises to the agent on every run.
-
-The catalog lives in the frontend because that is the only side that can own it:
-a renderer is code. The server imports nothing from either —
-`grep -rc definitions apps/runtime/src` returns zero.
-
-## What the browser is trusted with
-
-The agent gives the submit button a **resource and an operation**, never a URL.
-The browser looks those up in the descriptor it fetched itself. A model that
-transcribed an endpoint could transcribe a wrong one, and a form that posts
-confidently into nowhere is worse than one that refuses.
+They never import each other. In production they are three repositories; here
+they share a pnpm workspace, and `pnpm boundaries` stops that convenience
+turning into coupling — it checks cross-app imports, undeclared dependencies,
+and that the agent's prompt names no field of any resource.
 
 ## Commands
 
 | | |
-|---|---|
-| `pnpm dev:all` | All three at once |
-| `pnpm dev:web` | Browser, :5174 |
-| `pnpm dev:runtime` | Agent runtime, :4100 |
-| `pnpm dev:api` | Backend, :4200 |
-| `pnpm test` | vitest |
-| `pnpm lint` | oxlint |
-| `pnpm typecheck` | tsc -b across the three projects |
+| --- | --- |
+| `pnpm dev:all` | All three, prefixed output |
+| `pnpm dev:web` / `dev:runtime` / `dev:api` | One at a time |
+| `pnpm check` | Typecheck, lint, boundaries |
+| `pnpm build` | Production build of the browser app |
 
-## Findings
+## Documentation
 
-`docs/findings.md`. That file is the actual deliverable — negative results
-included, every claim tagged with how it was established.
+Start with **[docs/scope.md](docs/scope.md)** — what this set out to answer.
 
-`docs/architecture-review.md` is the other half: what the libraries do is one
-question, and what we built on top of them is another. It records four known
-weaknesses in this code and the order to take them in.
+| | |
+| --- | --- |
+| [scope.md](docs/scope.md) | The question, and what is in and out of scope |
+| [tech-stack.md](docs/tech-stack.md) | The three apps and every library choice |
+| [findings.md](docs/findings.md) | What these libraries actually do |
+| [learnings.md](docs/learnings.md) | What we would tell the next team |
+| [comparison.md](docs/comparison.md) | Advantages, costs, and the alternatives |
+| [verdict.md](docs/verdict.md) | When to use this, when not to, what is still weak |
 
 ## Conventions
 
 - Dependencies pinned **exactly**. No `^`, no `~`.
-- **zod 3**, deliberately — A2UI's binder reads `_def.typeName`, which zod 4 does
-  not set, and every input renders `[object Object]` with no error (F25).
-- `reference/portal-lite/` is the earlier CopilotKit evaluation, kept for
-  reading. Most of the findings here started there.
+- **zod 3**, deliberately — A2UI's binder reads zod 3 internals (see findings).
+- Shared versions come from the `catalog:` in `pnpm-workspace.yaml`.

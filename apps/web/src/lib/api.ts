@@ -1,15 +1,7 @@
 /**
- * Talking to the backend, from the browser.
- *
- * This is the whole of the client's knowledge about the API: one base URL. It
- * does not know a route, a method or a field — those come from the descriptor
- * the API publishes about itself, fetched below and looked up by name.
- *
- * That indirection is the point of `submit()` taking `{ resource, operation }`
- * rather than a URL. The agent chooses WHICH operation; it never writes WHERE.
- * A model that transcribed a path could transcribe a wrong one, and a form that
- * posts confidently to a plausible-looking endpoint is a worse failure than one
- * that refuses.
+ * The whole of the client's knowledge about the API: one base URL. Routes,
+ * methods and fields come from the descriptor. The agent chooses WHICH
+ * operation and never writes WHERE.
  */
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4200'
@@ -29,13 +21,7 @@ export type Descriptor = {
   references?: Record<string, Reference>
 }
 
-/**
- * One fetch per resource per page load.
- *
- * The descriptor is `no-store` at the server, so this is not a cache in the
- * HTTP sense — it is deduplication for a value read once per submit. A person
- * pressing a button twice should not cause two schema fetches.
- */
+/** Deduplication, not caching: pressing a button twice should not fetch the schema twice. */
 const descriptors = new Map<string, Promise<Descriptor>>()
 
 export function describeResource(resource: string): Promise<Descriptor> {
@@ -57,12 +43,9 @@ export function describeResource(resource: string): Promise<Descriptor> {
 }
 
 /**
- * Fill `:name` segments from the values, and say which were used.
- *
- * The path comes from the descriptor and the values from the form, so neither
- * the agent nor this file writes a URL. A segment with nothing to fill it is
- * reported rather than left in place: posting to a literal "/api/users/:id" is
- * a 404 whose cause is three layers from where it looks.
+ * Fill `:name` segments from the values. An unfilled segment is reported, not
+ * left in place: posting to a literal "/api/users/:id" is a 404 whose cause is
+ * three layers from where it looks.
  */
 function fillPath(path: string, values: Record<string, unknown>) {
   const used: string[] = []
@@ -83,13 +66,7 @@ export type SubmitResult =
   | { ok: true; data: unknown }
   | { ok: false; message: string; fields: Record<string, string> }
 
-/**
- * Post the answers to whichever route the API said this operation lives at.
- *
- * Both outcomes are returned rather than thrown, because both have to travel
- * back to the agent as the same kind of value — one for it to confirm, one for
- * it to explain.
- */
+/** Post to whichever route the API named. Both outcomes returned, not thrown — the agent narrates either. */
 export async function submit(
   resource: string,
   operation: string,
@@ -115,13 +92,7 @@ export async function submit(
     }
   }
 
-  /**
-   * What went in the path does not also go in the body.
-   *
-   * The id identifies the record; sending it as a field as well invites an API
-   * to treat it as an attempted change of identity, and ours would reject it as
-   * an unknown property on a strict schema.
-   */
+  // What went in the path does not also go in the body.
   const body: Record<string, unknown> = { ...values }
   for (const name of used) delete body[name]
 
@@ -148,16 +119,8 @@ export async function submit(
 }
 
 /**
- * Read, by operation name.
- *
- * Same rule as `submit`: the caller names WHICH operation, and the route comes
- * from the descriptor. A table that was handed a URL could be handed a wrong
- * one; a table that names "list" either finds it or says so.
- *
- * Rows never travel through the agent. It decides that a table belongs here and
- * which columns to show; the browser fetches the contents. That keeps a listing
- * of any size off the token bill, and — more to the point — means nothing in the
- * table can be something the model made up.
+ * Read, by operation name. Rows never travel through the agent: it decides a
+ * table belongs and which columns to show, the browser fetches the contents.
  */
 export async function read(
   resource: string,
@@ -193,12 +156,8 @@ export async function read(
 }
 
 /**
- * Ids resolved to something readable: user_1 becomes "Ada Okonkwo".
- *
- * The descriptor says which properties are references and which field to show
- * for them, so this needs no knowledge of what a user or a project is. Failure
- * is deliberately soft — a lookup that does not answer leaves the raw id, which
- * is worse to read and still true.
+ * Ids resolved to labels, from the descriptor's `references` — so this needs no
+ * idea what a user is. Soft failure: an unresolved id is worse to read, still true.
  */
 export async function labelsFor(
   descriptor: Descriptor,

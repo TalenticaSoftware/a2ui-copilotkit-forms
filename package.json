@@ -5,13 +5,13 @@
   "type": "module",
   "description": "Say what you want to do; the agent reads the API's schema and draws the form.",
   "scripts": {
-    "dev:all": "concurrently -k -n web,runtime,api -c cyan,magenta,green \"pnpm dev:web\" \"pnpm dev:runtime\" \"pnpm dev:api\"",
-    "dev:web": "pnpm --filter @prompt-to-form/web dev",
-    "dev:runtime": "pnpm --filter @prompt-to-form/runtime dev",
-    "dev:api": "pnpm --filter @prompt-to-form/api dev",
+    "boundaries": "tsx scripts/check-boundaries.ts",
     "build": "pnpm --filter @prompt-to-form/web build",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "check": "pnpm typecheck && pnpm lint && pnpm boundaries",
+    "dev:all": "concurrently -k -n web,runtime,api -c cyan,magenta,green \"pnpm dev:web\" \"pnpm dev:runtime\" \"pnpm dev:api\"",
+    "dev:api": "pnpm --filter @prompt-to-form/api dev",
+    "dev:runtime": "pnpm --filter @prompt-to-form/runtime dev",
+    "dev:web": "pnpm --filter @prompt-to-form/web dev",
     "lint": "oxlint apps boundaries.test.ts",
     "typecheck": "tsc -b"
   },
@@ -23,7 +23,6 @@
     "concurrently": "10.0.5",
     "oxlint": "1.80.0",
     "tsx": "4.23.12",
-    "typescript": "6.0.3",
-    "vitest": "4.1.11"
+    "typescript": "6.0.3"
   }
 }

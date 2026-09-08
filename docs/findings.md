@@ -1,1040 +1,122 @@
 # Findings
 
-What this app is actually for. Every claim is tagged `[hit]` — reproduced here,
-with the steps — or `[reasoned]`. Negative results count. Untagged claims do not
-belong in this file.
-
-Versions: `@copilotkit/runtime` 1.68.1 · `@copilotkit/react-core` 1.68.1 ·
-`@ag-ui/a2ui-middleware` 0.0.10 (transitive).
-
----
+What these libraries actually do, as opposed to what the documentation says.
+Every item below was reproduced, most of them the hard way.
 
-## F1 — CopilotKit's anonymous telemetry is on by default `[hit]`
-
-A runtime built with no telemetry configuration prints one line at startup and
-reports `telemetryDisabled: false` from `GET /api/copilotkit/info`. The line is
-easy to scroll past in a noisy dev log.
-
-Reproduce: start the server without `COPILOTKIT_TELEMETRY_DISABLED`, then
-`curl localhost:4100/api/copilotkit/info`.
-
-Not a bug — it is documented and there is an opt-out. Recorded because the
-default is on and the notice is quiet, which together decide what actually
-happens in most projects. `server/env.ts` defaults it off here.
-
-## F2 — A failed agent run is silent in the chat `[hit]`
+The common thread: **almost every failure in this stack is silent.** Nothing
+throws. The chat shows a spinner, or prose, or an empty card, and the logs say
+everything is fine.
 
-With a deliberately invalid API key, sending "I need a register form" through
-`CopilotChat` shows the user's message and then nothing. No error, no retry
-affordance, no failed state — the message simply sits there. The server log
-carries the real cause (`authentication_error: invalid x-api-key`), so the
-information exists and does not reach the screen.
-
-Reproduce: run the server with a deliberately invalid key, send any message,
-watch the chat pane and then the server log.
+## Silent failures
 
-Refined once the client was wired up: the information *does* reach the browser.
-The console carries
-`[CopilotKit] Error (agent_run_error_event) { code: INCOMPLETE_STREAM, message:
-"invalid x-api-key" }`. So this is not a missing signal — it is a signal that
-arrives and is never rendered. Whatever a person is shown for a failed run is a
-choice the host app has to make deliberately.
+**A2UI reports itself enabled while injecting nothing.** `injectA2UITool` has no
+default. Without it, `/info` returns `a2uiEnabled: true`, and the agent — with
+no way to draw — answers in prose claiming it drew a form.
 
-Severity is higher than it looks. A person cannot tell "the agent is thinking"
-from "the run died", and the failure mode this app most needs to observe — the
-agent producing a bad recipe — may land in the same silent hole. Whether an A2UI
-recovery lifecycle (`building` / `retrying` / `failed`) surfaces where a plain
-run failure does not is the first thing to check in step 5.
+**A quota failure renders as a permanent loading skeleton.** An exhausted API
+key produced "Building interface" indefinitely. The error reached the browser
+console as `INCOMPLETE_STREAM`; the only surface that stayed silent was the one
+a person was looking at.
 
-## F3 — The A2UI switch is real, and reports itself `[hit]`
+**A completed render that painted nothing.** The stream ran to `RUN_FINISHED`
+with the render tool answering `{"status":"rendered"}` and the conversation
+stayed blank. Two separate causes, both below.
 
-`new CopilotRuntime({ a2ui: { schema } })` is accepted, and
-`GET /api/copilotkit/info` then reports `"a2uiEnabled": true` alongside
-`"a2ui": { "enabled": true }`. A positive result, and a useful one: the runtime
-can be asked whether the feature took, so a mis-wired catalog is diagnosable
-without guessing.
+Diagnosing these needed the AG-UI event stream itself — tee the run endpoint's
+response body in the page. The visible symptom is identical for all three.
 
-## F4 — `@ai-sdk/anthropic` 4.x does not fit CopilotKit 1.68.1 `[hit]`
+## The injected tool validates nothing
 
-Installing the current `@ai-sdk/anthropic` (4.0.42) and passing
-`anthropic('claude-opus-5')` as the model fails to typecheck:
-`BatchLanguageModelV4` is not assignable to `LanguageModelV2`. CopilotKit 1.68.1
-depends on `@ai-sdk/anthropic: ^3.0.49`, a major version behind.
+Its schema is `items: { type: "object" }`. So:
 
-The fix is not to pin our own copy but to drop the dependency: `resolveModel`
-takes a `"provider/model"` string and resolves it with the version CopilotKit
-already ships. The string is passed through, so it is not limited to the model
-ids named in CopilotKit's own union — `anthropic/claude-opus-5` resolves despite
-that union topping out at `claude-sonnet-4.5`.
+- A prop name the model does not expect is **dropped in silence**. We declared
+  `variant`, copying A2UI's own naming; the agent sent `type` anyway and every
+  field rendered as plain text. Renaming to `type` fixed it.
+- A **required** prop is a request, not a guarantee.
 
-This is now how the server names its model for every provider, not a workaround
-for one of them. `MODEL="openai/gpt-4.1"` is the default; the provider prefix
-also picks which API key variable is required, so changing provider is an .env
-edit rather than a code change.
+Where the model's instinct and the library's naming disagree, the model wins.
 
-## F5 — The shipped schema helper silently downgrades validation `[hit]`
+## `id` is reserved, and a prop by that name is eaten
 
-`@copilotkit/a2ui-renderer` exports `extractSchema(definitions)` and documents it
-as "suitable for passing to the runtime's `a2ui.schema` config". It returns the
-LEGACY array format, `[{ name, description, props }]`.
+A2UI reads every node as `{ id, component, ...properties }`. A catalog
+declaring a prop called `id` never receives it — the value becomes the
+*component's* id, the component registers itself under the wrong name, and its
+parent's `children` reference dangles. Draws nothing. Reports success.
 
-The middleware accepts that format and then degrades to structural-only
-validation — its own source says the semantic catalog "returns undefined for the
-legacy array form or no schema". So the documented path from client catalog to
-server schema quietly costs you the check that catches a wrong recipe, and
-nothing warns.
+Reserve `id` and `component` in any custom catalog.
 
-Worked around by generating the v0.9 inline catalog on the server directly from
-zod (`src/lib/a2ui-catalog.ts`) and letting the client file supply renderers
-only.
+## The catalog id travels in the run context
 
-## F6 — The A2UI renderer needs zod 3; the app is on zod 4 `[hit]`
+The A2UI middleware finds the catalog id in an agent-context entry that
+**CopilotKit's core assembles**. Calling `agent.runAgent()` directly bypasses
+that: the middleware falls back to a hardcoded basic-catalog id, and since the
+renderer holds exactly one catalog matched by exact id, there is nothing to fall
+back to. The turn dies with `Catalog not found`.
 
-`createCatalog(definitions, renderers)` type-checks renderers against zod props
-schemas, which is exactly the shape contract worth having. It cannot be used
-honestly from a zod-4 codebase: `@copilotkit/a2ui-renderer` 1.68.1 peer-depends
-on `zod ^3.25.75` and resolves its own 3.25.76, so a zod-4 object is rejected as
-missing `_parse`, `_cached`, `UnknownKeysParam` and a dozen other zod-3
-internals.
+Use `useCopilotKit().copilotkit.runAgent({ agent })`.
 
-There is no honest fix available to a caller. Installing zod 3 alongside means
-two zods and two schemas, which is the drift the design exists to prevent. The
-app casts at exactly one boundary and re-parses the props with the real zod-4
-schema before drawing, so the library's copy is a label rather than a check.
+## zod 4 breaks the binder, silently
 
-Still open: whether the library reaches into the schema's zod-3 internals at run
-time. Needs a live agent run.
+A2UI's binder decides which props are data bindings by reading
+`_def.typeName === 'ZodUnion'` for an option shaped `{ path }`. zod 4 does not
+set `_def.typeName`, so every prop classifies as static and every input renders
+`[object Object]`. No error anywhere.
 
-## F7 — Two React copies, reported as a Rules-of-Hooks mistake `[hit]`
+A binding must be declared as a union containing `{ path }` — not a bare object.
 
-Adding `@copilotkit/a2ui-renderer` produced a page full of "Invalid hook call…
-You might be breaking the Rules of Hooks", followed by
-`Cannot read properties of null (reading 'useState')`. The app renders nothing
-useful and the message points at your own code.
+## The agent composes leaves, not containers
 
-It is not your code. Every React symlink on disk resolves to the same
-`react@19.2.8`; the duplication is in Vite's dependency pre-bundle, which
-produced two optimized copies (visible as two different `?v=` hashes on
-`react-dom_client.js`). `resolve.dedupe: ["react", "react-dom"]` plus clearing
-`node_modules/.vite` fixes it.
+Publishing one rich `Form` component whose props were a whole form spec did not
+work. Offered A2UI's primitives alongside it, the agent composed those and
+ignored ours; offered ours alone, it refused outright, saying the catalog had no
+input fields.
 
-Recorded because of how badly the error misdirects. Two of the three causes
-React suggests are wrong here, and the true one is third on the list.
+A2UI's tool composes a **tree of small components**. Every working
+implementation exposes leaves.
 
-## F8 — Not yet answered: does any of this work end to end? `[reasoned]`
+## `createCatalog` drops the ability to write
 
-Everything up to the model call is verified. The catalog is generated, the
-runtime reports `a2uiEnabled: true`, the client catalog is registered, and the
-renderer draws correctly from hand-written recipes. What has NOT been observed is
-a real agent producing a real recipe, because that needs an API key.
+The convenience wrapper forwards only `{ props, children, dispatch }` to each
+renderer, dropping the `context` that carries `dataContext.set` — the only way a
+component can write a value back. Build on `createReactComponent` directly.
 
-Recorded rather than assumed. Until a live run happens, "the agent's recipe
-renders with our components" is a design claim, not a result — and the whole
-point of this file is that the two are not the same thing.
+Related: `action.functionCall` is specified as running "on the renderer", but
+`web_core` ships no function registry and its dispatcher only emits payloads
+containing `event`. A `functionCall` action goes nowhere.
 
-## F9 — `a2uiEnabled: true` with no tool injected, and the agent lies about it `[hit]`
+## It did not work on OpenAI
 
-The headline finding so far.
+A2UI injected no tool and rendered nothing on OpenAI models. The same code on
+Gemini worked immediately. Diagnosed with a control run before changing anything
+else.
 
-`new CopilotRuntime({ a2ui: { schema } })` reports `"a2uiEnabled": true` from
-`/info`, injects the catalog as context, and **injects no render tool**. The
-middleware gates that on a separate flag:
+## An agent cannot resolve a name to an id
 
-```js
-this.config.injectA2UITool ? this.injectToolGuidelines(this.injectToolAndFlag(i)) : i
-```
+It reads schemas, never rows. Asked to "edit the Website refresh project" it
+**invented** an id — `"1"`, `"website-refresh"` — and the client dutifully tried
+to load it. Sometimes it admitted defeat instead, so which behaviour you got was
+luck.
 
-`injectA2UITool` has no default. The runtime only fills one in when the CLIENT
-advertises a catalog (`injectA2UITool ?? (providerA2UIHasCatalog ? true : void 0)`),
-so a server-configured catalog alone leaves it undefined and the tool never
-exists. `RunAgentInput.tools` was `[]`.
+Give it a lookup tool. Returning only `{ id, label }` keeps listings out of the
+model's context.
 
-What a person sees: asking "I need a register form" returns
-
-> "Here is a register form containing the essential fields: email address and
-> password. If you need additional fields… please specify exactly what you
-> require."
-
-Nothing was rendered. The agent had no way to draw anything, so it described a
-form and said "here is" — narrating a thing that does not exist, beside a UI
-that shows nothing. This is Second Brain's F24 arriving through a different
-door, and it is worse here because every observable signal says the feature is
-on: `a2uiEnabled: true`, no error, no warning, HTTP 200.
-
-Reproduce: omit `injectA2UITool`, ask for a form, then read
-`RunAgentInput.tools` in the `/run` request body.
-
-Fixed by setting `injectA2UITool: true` explicitly.
-
-## F10 — Our catalog never reached the agent `[hit]`
-
-With A2UI configured server-side, the context injected into the run was the
-**basic catalog**:
-
-```
-"Available A2UI catalog:
- - https://a2ui.org/specification/v0_9/basic_catalog.json (basic catalog)"
-```
-
-`catalogId` was the basic one and `Form` appeared nowhere. The agent was offered
-`Text`, `Image`, `Icon`, `Video` — nothing that can express a form.
-
-Two candidate causes, not yet separated:
-
-1. The client's `createA2UIMessageRenderer({ catalog })` does not advertise the
-   custom catalog into the run context — the capabilities line lists only the
-   basic catalog while claiming to list "custom component definitions the client
-   can render".
-2. Our server-side `schema` is shaped wrongly and is being ignored (see F11),
-   leaving the client's advertisement in place.
-
-## F11 — An A2UI catalog entry is not a plain JSON Schema `[reasoned]`
-
-Probable root cause of F10, and of the empty surface that follows it.
-
-We modelled the catalog as one `Form` component whose props are the whole form
-spec, generated with `z.toJSONSchema`. The basic catalog's entries do not look
-like that. Each is an envelope:
-
-```
-"Text": { "allOf": [ { "$ref": "common_types.json#/$defs/ComponentCommon" },
-                     { "properties": { "component": { "const": "Text" }, … },
-                       "required": ["component", "text"] } ] }
-```
-
-And the middleware only emits components whose items satisfy
-`typeof f.component === "string"`. So an A2UI component is a NODE carrying its
-own `component` discriminator inside a `ComponentCommon` envelope — not an
-arbitrary JSON Schema object.
-
-Consistent with what the agent actually produced once the tool existed:
-
-```json
-{"surfaceId":"login-form","components":[{ }],"data":{}}
-```
-
-One empty object. It called the tool, had no component vocabulary it could
-express, and emitted nothing usable. The middleware then never emits a surface,
-so the skeleton says **"Building interface · ~240 tokens"** forever — no error,
-no timeout, no failure state. F2's silence, in its most expensive form.
-
-Next step: reshape `buildCatalog()` to emit v0.9 component envelopes rather than
-a bare JSON Schema, and re-check whether the context then carries `Form`.
-
-## F12 — A2UI cannot render with OpenAI: the render tool's schema forbids content `[hit]` / `[reasoned]`
-
-The biggest finding so far, and it is not about our catalog.
-
-Run with A2UI's OWN basic catalog — no custom schema, no custom renderer, the
-framework entirely as shipped — and ask for a register form. The agent calls
-`render_a2ui` and produces:
-
-```json
-{"surfaceId":"register-form","components":[{ },{ },{ },{ },{ }],"data":{}}
-```
-
-Five empty objects. It plainly worked out that a register form needs five
-components and could not describe a single one of them.
-
-`[hit]` — the observation. Raw `TOOL_CALL_ARGS` deltas show the model emitting
-`{`, then a run of TAB characters, then `}`, per component:
-
-```
-delta='{'  delta='\t'  delta='\t'  …  delta='}'
-```
-
-That is a model padding a space it is not allowed to write anything into.
-
-`[hit]` — the cause in the schema. `RENDER_A2UI_TOOL` declares:
-
-```js
-components: { type: "array", items: { type: "object" } }
-```
-
-`items` has no `properties`. The component vocabulary is delivered separately,
-as prose in a context block — it is not in the tool schema at all.
-
-`[reasoned]` — the attribution. `@ai-sdk/openai` passes `strict: strictJsonSchema`
-through to OpenAI's tool calling. Under strict structured output, a schema of
-`{type:"object"}` with no declared properties admits exactly one value: `{}`.
-Not confirmed on the wire; confirming it needs the outbound request body.
-
-Consequences, in order of severity:
-
-1. A2UI as shipped renders nothing through this OpenAI path — not our catalog,
-   not the basic one.
-2. Nothing reports the failure. The tool call succeeds, the run finishes, and
-   the surface never arrives, so the client shows "Building interface" forever.
-   No error, no timeout, no failed state.
-3. Every earlier finding about our own catalog (F10, F11) is unproven while this
-   holds. They may still be true; they are not the reason nothing renders.
-
-The control run was worth doing precisely because it moved the fault from our
-code to the framework, which is the opposite of what we expected and the more
-important answer.
-
-Untried: whether the same run against Anthropic behaves differently, since its
-tool calling does not enforce strict schemas the same way. That single test
-would turn the `[reasoned]` half into a `[hit]` and is the next thing to do.
-
-## F13 — It works, via the path neither reference implementation uses `[hit]`
-
-The fix, and the answer to F12.
-
-The middleware paints a surface from TWO sources: the tool it injects, and any
-tool whose result content parses as `{ a2ui_operations: [...] }`. Only the first
-is broken. So we turned `injectA2UITool` off, declared our own tool whose
-`parameters` are the real zod form schema, and returned the operations from its
-handler.
-
-Strict mode stops being an obstacle and becomes the point: the model is now held
-to the same seven field kinds the renderer can draw.
-
-Asked for a register form, the agent produced:
-
-```json
-{"title":"Register","description":"Create a new account…","submitLabel":"Register",
- "fields":[{"name":"email","kind":"email","required":true,…},
-           {"name":"username","kind":"text","required":true,…},
-           {"name":"password","kind":"password","required":true,…}]}
-```
-
-Complete, valid, every `required` stated — and it rendered as our own shadcn
-form inside the conversation, password toggle and all. Filled in and submitted,
-the values arrived intact.
-
-### Why the reference implementations do not hit this
-
-Neither uses the injected tool. `a2ui-poc` has the model write A2UI JSON into
-its message body via `DirectJsonFormat`, and passes its catalog through a
-modifier named — with no ambiguity about what it is for —
-`remove_strict_validation`. The Second Brain dashboard emits state snapshots and
-paints from those. Both route around the exact place we got stuck.
-
-### The five questions the plan set, answered
-
-1. **Does the catalog constrain the agent?** Yes, once the constraint lives in a
-   tool schema rather than a prose context block. Every field came back as one
-   of our seven kinds.
-2. **What does a person see while it thinks?** A skeleton with a live token
-   count. It reads as progress — but it is also what a permanently stuck run
-   looks like (F12), with nothing to tell the two apart.
-3. **Does a rendered form survive streaming?** Yes. The register form kept its
-   values while a second form was generated and painted beside it. The module
-   store was the right call and the risk did not materialise.
-4. **Can the form send anything back?** Into the app, yes — submitted values
-   reach our store. Back to the AGENT is still untested; the middleware has a
-   `userAction` path (`processUserAction`) that was not exercised.
-5. **Catalog or prompt — which wins?** Not yet separated, and less interesting
-   now: the tool schema outranks both.
-
-### The acceptance test, met
-
-"I need a login form" produced Email, Password, a Login button, and nothing
-else. No phone number, no full name, no address. The absence was always the
-criterion, and it held.
-
-## F14 — F12 is provider-specific, and confirmed. A2UI works as documented on Gemini `[hit]`
-
-Same code, same catalog, same injected tool — only the model changed. `RENDER_MODE=a2ui`
-with `google/gemini-3.6-flash` produced a complete surface:
-
-```json
-{"surfaceId":"register-form","components":[
-  {"component":"Column","id":"root","children":["title","name-field",…],"gap":16},
-  {"component":"Title","id":"title","text":"Register"},
-  {"component":"TextField","id":"name-field","label":"Full Name","required":true,
-   "value":{"path":"/fullName"}},
-  …
-  {"component":"Button","id":"submit-button","label":"Register",
-   "action":{"event":{"name":"register_user","context":{…}}}}
-],"data":{"fullName":"","email":"","password":""}}
-```
-
-Real components, real props, data bindings, an action event. It rendered — a
-working register form drawn entirely by A2UI's own renderer, with **none** of our
-`src/lib` involved.
-
-So the `[reasoned]` half of F12 is now settled. The tool schema declaring
-`items: { type: "object" }` is only fatal where the provider enforces strict
-schemas. OpenAI does; Gemini does not.
-
-Note also that `gemini-2.5-flash` — the newest Gemini in CopilotKit's own model
-union — returns 404 "no longer available to new users". The union is stale; the
-string passes through, so `google/gemini-3.6-flash` works anyway.
-
-## F15 — The middleware reports "rendered" for components that do not exist `[hit]`
-
-In the same run, Gemini invented three component names: `Title`, `EmailInput`
-and `PasswordInput`. None is in A2UI's catalog, whose renderer supports `Text`,
-`TextField`, `Button`, `CheckBox`, `Column`, `Row`, `Card` and a dozen others.
-
-The middleware emitted `createSurface`, `updateComponents`, `updateDataModel`
-and returned `{"status":"rendered"}`.
-
-The cause is in its own source: `getValidationCatalog()` returns undefined
-unless `config.schema` carries an inline catalog, and validation then degrades
-to structural-only — it checks `typeof f.component === "string"` and nothing
-more. With A2UI's built-in catalog and no explicit schema, ANY component name
-passes.
-
-This compounds F5: the shipped helper for producing that schema emits the legacy
-array format, which also yields no validation catalog. Both documented routes to
-a validated catalog end in no validation, silently.
-
-## F16 — A2UI's own widgets drop constraints the agent expressed `[hit]`
-
-The rendered form, read from the DOM:
-
-| Field | Input type | `required` |
-|---|---|---|
-| Full Name | `text` | false |
-| Email Address | `text` | false |
-| Password | `password` | false |
-
-Gemini sent `required: true` on all three, and named the middle one an email
-field. What reached the browser was three inputs, one of them masked, none
-required and none typed as email.
-
-Not a bug so much as a ceiling: A2UI's catalog is a generic widget set, so a
-form drawn from it is a form without validation. That is the real trade against
-our own renderer — which enforces `required`, validates email, and refuses a
-submit — rather than the aesthetic difference it first appears to be.
-
-## F17 — The catalog goes on the PROVIDER, not the message renderer `[hit]`
-
-The answer to F10, and the reason our catalog never reached the agent.
-
-`createA2UIMessageRenderer({ catalog })` draws a surface. It does not advertise
-one. Only `CopilotKitProvider`'s `a2ui={{ catalog }}` mounts
-`A2UICatalogContext`, whose own doc comment says it "renders agent context
-describing the available A2UI catalog and custom components" — adding two
-context entries to every run:
-
-- *"A2UI catalog capabilities: available catalog IDs and custom component
-  definitions the client can render"*
-- the component schemas, in the v0.9 inline format via
-  `extractCatalogComponentSchemas`
-
-That is the `supportedCatalogIds` negotiation the A2UI spec describes. Without
-it the agent is told about the basic catalog only, no matter what the browser
-can actually draw.
-
-Both props are typed `catalog?: any`, both named `catalog`, and only one does
-the thing you need. Neither is documented: CopilotKit's A2UI page shows
-`a2ui: {}` on the server and a `theme` on the client, and covers custom catalogs
-nowhere — while the A2UI spec calls them the normal case, since "most production
-applications will define their own catalog to reflect their specific design
-system".
-
-With the prop moved, the agent emitted our component correctly on the first try:
-
-```json
-{"components":[{"component":"Form","id":"root","title":"Create an Account",
-  "submitLabel":"Register","fields":[
-    {"name":"name","kind":"text","label":"Full Name","required":true}, …]}]}
-```
-
-and it rendered as our shadcn form — required marks, password toggle and all.
-**A2UI's documented path, with our design system.** That is the middle row of the
-grid, and it works.
-
-## F18 — WITHDRAWN. A2UI does NOT paint partial frames `[hit]`
-
-**Superseded by F21.** The observation below was real; the explanation was wrong,
-and it was wrong in the direction that would have cost us the simpler
-architecture. Left in place because a retracted finding is worth more than a
-quietly deleted one.
-
-## F18 (original, incorrect) — A2UI paints partial frames `[reasoned, disproven]`
-
-Non-deterministic, which is what makes it dangerous.
-
-The first run of the above showed our failure card:
-
-```
-fields.0.name: Invalid input: expected string, received undefined
-fields.1.name: …
-```
-
-The agent's output was complete and correct — verified on the wire. The
-middleware emits `updateComponents` REPEATEDLY as the tool's arguments stream
-in, so our renderer is handed the half-built object several times, and one of
-those intermediate frames was the last thing it parsed.
-
-The second, identical run rendered perfectly. Same code, same prompt, different
-outcome.
-
-Our own tool does not have this problem: `execute` returns the finished spec in
-one piece, so no partial frame exists. It is specific to the injected tool's
-streamed arguments.
-
-The fix is not to loosen validation — a partial frame is exactly the "half a
-form" case worth refusing. It is to distinguish "not finished yet" from
-"invalid", which the surface lifecycle already knows and does not pass on.
-
-## The grid, complete
-
-| | OpenAI | Gemini |
-|---|---|---|
-| A2UI tool + basic catalog | ❌ empty components (F12) | ✅ renders, no validation (F16) |
-| A2UI tool + **our** catalog | ❌ (F12 is about the tool) | ✅ **shadcn, our validation** (F17), flaky (F18) |
-| **Our tool** + our catalog | ✅ | ✅ |
-
-Only the bottom row works on both providers, and only it is deterministic.
-
-## F19 — An over-strict contract field hangs the run, silently `[hit]`
-
-Our own bug, and the most instructive one yet.
-
-`fieldName` required camelCase: `^[a-z][a-zA-Z0-9]*$`. Asked for a login form,
-the model returned `"name": "remember_me"`. The tool's parameter validation
-refused the call, `execute` never ran — and the stream ended:
-
-```
-RUN_STARTED · TOOL_CALL_START · TOOL_CALL_ARGS · TOOL_CALL_END
-```
-
-No `TOOL_CALL_RESULT`. No `RUN_ERROR`. No `RUN_FINISHED`. The spinner never
-stops and nothing anywhere says why.
-
-Two lessons, and the second is the bigger one:
-
-A constraint that buys nothing is not free. camelCase versus snake_case makes no
-difference to anything downstream — both are fine object keys — and the rule
-existed only because it looked tidy. Relaxed to `^[a-z][a-zA-Z0-9_]*$`.
-
-And a rejected tool call is indistinguishable from a hang. The framework has no
-event for "the tool refused its arguments", so any schema an agent can fail to
-satisfy is a way to stall the run with no diagnosis. Anything strict in a tool
-schema needs to be there for a reason you can name.
-
-## F20 — A rate limit is a spinner `[hit]`
-
-Final verification was blocked by Gemini's free-tier quota. The browser console
-carried it plainly:
-
-```
-[CopilotKit] Error (agent_run_error_event): Failed after 3 attempts.
-Last error: You exceeded ... gemini-3.6-flash. Please retry in 47.8s
-```
-
-The screen showed a loading dot. No message, no retry affordance, no countdown —
-and the information had already reached the client.
-
-This is F2's third distinct trigger: a bad key, a failed generation, and now a
-rate limit all present identically to a person. Worth stating as a single
-conclusion rather than three findings: **CopilotKit surfaces run failures to the
-console and not to the UI, and a host app has to render them itself.**
-
-It also explains earlier "hangs" in this session that we attributed to the
-agent. Two identical requests, minutes apart, produced a stall and then a clean
-`RUN_FINISHED` — the difference was quota, not code.
-
-
-## F21 — F18 was wrong: the middleware only paints complete components `[hit]`
-
-Spent an hour on the question "can the renderer tell 'still streaming' from
-'broken'?" The answer turned out to be that it does not need to.
-
-**There is no signal.** `RendererProps` carries `props`, `children` and
-`dispatch`. `Surface` is typed `any`. `useA2UI()` exposes `version` — a change
-counter — and nothing about completeness. A renderer genuinely cannot ask
-whether more is coming.
-
-**But the middleware never hands it an incomplete component.**
-`updateComponents` is emitted only once `extractCompleteItemsWithStatus` reports
-the components array CLOSED. That function is exported, so the assumption is
-testable rather than inferred — `streaming.test.ts` walks every plausible
-intermediate state of a realistic tool-argument stream and asserts none yields a
-component our contract would reject. It passes across ~30 prefixes, including
-the interesting one: a nested `fields` array closes long before `components`
-does, and its `]` is NOT mistaken for the outer close.
-
-So what caused the failure cards we saw?
-
-Two things, neither of them streaming:
-
-1. **F19** — our own camelCase rule, refusing `remember_me`. Now relaxed.
-2. **F10's mis-wiring.** The very first failure showed `name` missing from every
-   field while the wire carried it on all of them — a stripped prop, not a
-   truncated one. That run had the catalog registered through
-   `createA2UIMessageRenderer` instead of the provider. Leading explanation, and
-   the only one consistent with all three fields losing the same key.
-
-`[reasoned]` on the second point: confirming it needs a live run, and Gemini's
-free-tier quota is exhausted.
-
-### Why this matters more than the finding itself
-
-If partial frames were real, our own tool would be the only way to render
-reliably, and the contract would have to be shared across two repos.
-
-They are not real. Which means A2UI's own injected tool is viable on Gemini, the
-frontend can own the catalog alone and advertise it at runtime, and the
-cross-repo contract problem does not need solving — it disappears.
-
-I argued the opposite an hour ago on the strength of F18. The test is why the
-correction is trustworthy and the original claim was not.
-
-## F22 — Pure A2UI: the server ends up knowing nothing about forms `[hit, unverified live]`
-
-Acting on F21. `formTool.ts` deleted, `injectA2UITool: true`, no custom tool, no
-`a2uiToolNames`, no mode switch.
-
-`grep -c contract server/*.ts` now returns 0 for every file. The server holds an
-API key, a runtime and a generic prompt; the browser owns the component catalog
-and advertises it — with its schemas — on every run. That is A2UI's design, and
-it means the contract lives in one repository rather than two.
-
-Verified without the model: typecheck clean across three projects, 12 tests
-pass, lint clean, the server boots, and `/info` still reports
-`"a2uiEnabled": true`.
-
-**NOT verified live.** Gemini's free-tier quota moved from a per-minute limit
-("retry in 22s") to the daily cap ("You exceeded your current quota, check your
-plan and billing details"), which does not reset for hours. So the claim that
-this renders a form is a design claim, not a result — the same distinction F8
-was recorded for, and worth keeping honest about after F18 turned out to be
-wrong.
-
-To settle it, when quota returns:
-
-```
-pnpm dev:server && pnpm dev     # then ask for a login form
-```
-
-If it fails, `git revert` restores `formTool.ts` and the mode switch, and the
-"own" path was working as of commit ca8dda1.
-
-## F22 (settled) — Pure A2UI renders, and the agent ignored our catalog `[hit]`
-
-It works, and the result is not what we wanted.
-
-`formTool.ts` deleted, `injectA2UITool: true`, our catalog advertised through the
-provider, `includeBasicCatalog: true`. Asked for a login form on
-`gemini-3.6-flash`. After roughly two minutes a form appeared:
-
-```
-Log In
-Email
-Password
-[ Log In ]
-```
-
-But it is drawn with A2UI's OWN components, not ours. Read from the DOM:
-
-| | |
-|---|---|
-| Email input type | `text` — not `email` |
-| `required` | `false` on both, though a login form needs both |
-| Password show/hide toggle | absent |
-| Required marks | absent |
-| Submit button | A2UI's blue default, not our shadcn button |
-
-**The agent had our `Form` component available and chose not to use it.**
-`includeBasicCatalog: true` offers `Card`, `TextField` and `Button` alongside
-ours, and composing three small primitives is evidently an easier path than
-filling one component with a nested `fields` array.
-
-So advertising a custom catalog does not mean it gets used. Nothing forces the
-choice, nothing reports that it was skipped, and the failure is invisible: what
-appears is a plausible form, so only a DOM inspection reveals that the design
-system and every constraint were dropped on the way (F16, now reproduced through
-our own catalog rather than the basic one).
-
-### What this settles
-
-- **Pure A2UI works.** The architecture is sound: the server knows nothing about
-  forms, the browser advertises what it can draw, and a form appears.
-- **It does not preserve our components.** Not reliably, and not without a way
-  to make the agent prefer them.
-
-Two things left untried, in order of promise: dropping
-`includeBasicCatalog` so ours is the only option, and naming the component in
-the prompt. Both are cheap; neither is guaranteed, because the choice is the
-model's.
-
-The custom tool did not have this problem — `renderForm` was the only tool, so
-"use our component" was not a decision the agent could get wrong.
-
-## F23 — A2UI's tool wants PRIMITIVES, not intents. Our design cannot be used through it `[hit]`
-
-The decisive result, and it closes the question F22 opened.
-
-`includeBasicCatalog: false`, so our `Form` is the only component the agent can
-name. Asked for a register form, it refused:
-
-> "I cannot render a registration form because the available component catalog
-> (prompt-to-form/v1) does not include the necessary input fields (such as text
-> fields, password inputs, or buttons) needed to build the form."
-
-Our catalog contains every one of those things — inside `Form`, whose props are
-a typed array of seven field kinds, each described. The agent read the catalog
-and concluded it could not build a form.
-
-So both positions of the switch fail, for the same underlying reason:
-
-| `includeBasicCatalog` | Result |
-|---|---|
-| `true` | Agent composes A2UI's Card/TextField/Button. Ignores ours. No validation, no shadcn (F22) |
-| `false` | Agent refuses, saying the catalog has no text fields or buttons |
-
-**A2UI's injected tool expects a catalog of small composable primitives.** It
-composes a tree; it does not fill one rich component. A "fat" component carrying
-a domain model is not a shape it knows how to use, however well described.
-
-That settles the primitives-versus-intents question by measurement rather than
-argument, and it explains why `renderForm` worked: as a TOOL, the form schema
-was the thing being filled, so there was no composition decision to get wrong.
-
-### Worth saying plainly
-
-The refusal is GOOD behaviour. The agent said what was missing and why, and
-invented nothing — no placeholder form, no "here is a register form" beside an
-empty screen (F9), no plausible-looking substitute (F22). Of the three failure
-modes seen in this project, this is the only one a person could act on.
-
-### What it means for the architecture
-
-There is no configuration of A2UI's injected tool that renders our design. The
-options are:
-
-1. **Redesign as primitives** — expose `TextField`, `PasswordField`, `Button`
-   etc. as separate components and let the agent compose. Readable, matches
-   every shipping example — and gives up `required`, all-or-nothing validation,
-   and the submit path (F16), because nothing owns the form.
-2. **Go back to our own tool** — `renderForm` renders our components with our
-   validation on both providers. Costs a tool the server must define, so the
-   server knows what a form is again.
-
-There is no third option that keeps both, and the choice is now evidenced rather
-than assumed.
-
-## F24 — Prop names must match the model's instinct, not the library's `[hit]`
-
-Our `TextField` declared `variant: 'shortText' | 'email' | 'obscured' | …`,
-copying A2UI's own naming. The agent ignored it and sent `"type": "email"`.
-
-Nothing complained. The injected tool's schema is `items: { type: "object" }`,
-which validates nothing, so an unrecognised prop name is dropped in silence and
-every field rendered as plain text.
-
-Renaming the prop to `type` with HTML-ish values (`text | email | password |
-number | textarea`) fixed it on the next run. The catalog description is
-guidance, not a constraint — so where the model's instinct and the library's
-vocabulary disagree, the model wins.
-
-## F25 — A2UI's binder reads zod 3 internals, and zod 4 fails silently `[hit]`
-
-The finding that made everything else work, and the sharpest version of F6.
-
-Bindings, actions and validation are not declared by naming a prop — they are
-DETECTED, by the binder inspecting the zod schema:
-
-```js
-current._def.typeName === 'ZodUnion'
-options.some(o => o._def.typeName === 'ZodObject' && o._def.shape().path)
-   → { type: 'DYNAMIC' }
-```
-
-`_def.typeName` is zod 3. On a zod 4 schema:
-
-```
-_def.typeName : undefined
-_def.type     : "union"
-```
-
-Every check returns false, so every prop is classified `STATIC` and passed
-through raw. The symptom was every input showing `[object Object]` — the binding
-object itself, never resolved. `checks` never evaluated, and `action` never
-became the callable closure the binder is documented to produce.
-
-No error, no warning. A cast silenced this at compile time (F6); it could not
-silence it at run time.
-
-Two things follow, and the second is the one to remember:
-
-1. **The app is now on zod 3.25.76**, matching what `@copilotkit/a2ui-renderer`
-   resolves. Not an alias — one zod, because two would be the drift this design
-   exists to prevent.
-2. **Shape matters more than name.** `value` must be a UNION containing
-   `{ path }`, and `action` a union containing `{ event }`. Declared as a bare
-   object or `z.any()`, they are inert. None of this is in CopilotKit's docs or
-   its skill file; it is in web_core's source.
-
-## F26 — It works, end to end `[hit]`
-
-shadcn + CopilotKit + AG-UI + A2UI, all four, on `gemini-3.6-flash`.
-
-"I need a register form" produced a card with Full Name, Email and Password —
-each marked required, the email input typed `email`, the password masked with our
-show/hide toggle, and a "Create account" button. Typed values wrote into A2UI's
-data model and read back. Pressing the button dispatched to the agent, which
-replied:
-
-> "Your registration has been submitted successfully for Jordan Mensah
-> (jordan@example.com)."
-
-The agent had the values. Every layer is load-bearing: CopilotKit for the chat
-and runtime, AG-UI for streaming, A2UI's injected tool and catalog negotiation
-for composition and data binding, shadcn for every pixel.
-
-The server imports nothing about forms — `grep -c definitions server/*.ts` is 0
-for every file. The catalog lives in the browser and is advertised at run time,
-so the two halves can be separate repositories with no shared contract.
-
-### What made it work, in order of how long it cost
-
-1. Leaves, not one rich component (F23)
-2. Prop names the model expects (F24)
-3. zod 3, and union shapes the binder can detect (F25)
-
-None of the three is documented. All three were found by reading
-`@a2ui/web_core`'s source, which ships uncompiled — the single most useful thing
-in the whole dependency tree.
-
-## F27 — A2UI specifies local actions, and web_core does not implement them `[miss]`
-
-The spec is explicit that actions come in two kinds. `event` goes to the agent;
-`functionCall` is described as executing "immediately on the renderer" with no
-network involved, and is offered for exactly our case — navigation, client-side
-validation, anything the client should just do.
-
-`@a2ui/web_core@0.10.4` ships no function registry. There is no way to name a
-handler, and its dispatcher only emits payloads that contain `event`:
-
-```js
-// src/v0_9/state/surface-model.js:74
-// Note: local functionCall actions are currently handled by the renderer or
-// binder and do not necessarily need to be emitted here...
-```
-
-Neither the renderer nor the binder handles them either. A `functionCall` action
-is accepted, validated, and goes nowhere — the same silent-drop failure mode as
-F24, one layer down.
-
-## F28 — CopilotKit owns the A2UI provider, so a client cannot intercept an action `[miss]`
-
-`A2UIProvider` does take a handler:
-
-```ts
-interface A2UIProviderProps {
-  onAction?: OnActionCallback   // "invoked when a user action is dispatched"
-  theme?, catalog?, children
-}
-```
-
-But an app using CopilotKit's automatic A2UI rendering never mounts it. What
-`<CopilotKitProvider>` exposes is:
-
-```ts
-a2ui?: { theme?, catalog?, loadingComponent?, sendSchemas? }
-```
-
-No `onAction`. Reaching it means giving up automatic rendering and mounting the
-provider by hand — trading the thing that works for a hook.
-
-So the interception happens one level lower, in our own `SubmitButtonRenderer`,
-which the binder already hands both the data model and the raw component node.
-The library's seam is closed; the component's is not.
-
-## F29 — The data model is a working channel between siblings, in both directions `[hit]`
-
-A2UI's data model is presented as the agent's way of populating a UI. It is also
-usable the other way, by the client, at run time — and that is what carries a
-server rejection to the field it belongs to.
-
-The submit button hears the API; the input has to show the message; they are
-siblings with no props between them. Writing `/_errors/email` and having each
-input subscribe to its own key works, using `subscribeDynamicValue` — the same
-mechanism the binder uses for bound values, so an error re-renders for the same
-reason a typed character does. A plain `get` would not do: the value arrives
-after the press, and a snapshot taken at render time shows nothing.
-
-Two things this depends on. `dataModel.set` creates missing parents, so
-`/_errors` need not be declared. And the model doubles as the POST body, so the
-key is stripped before sending — a shared bus needs a reserved namespace, and
-nothing in A2UI provides one.
-
-## F30 — A form derived from a live API, and saved to it `[hit]`
-
-"add a user", on `gemini-3.6-flash`, against a backend it had never been told
-about. The API's log is the whole story:
-
-```
-[api] GET /api/schema        → 200    agent asks what exists
-[api] GET /api/schema/users  → 200    agent reads the JSON Schema
-[api] GET /api/schema/users  → 200    browser looks up the route to post to
-[api] POST /api/users        → 422    duplicate email
-[api] POST /api/users        → 201    corrected, and created
-```
-
-The form carried Full Name, Email Address, Role and "Email them an invitation
-now" — four fields, matching `createUserSchema` exactly. Role's options were
-`admin | editor | viewer`, the schema's enum rather than invented ones. The help
-text under each input was the schema's `.describe()` string, written once for a
-person to read and used verbatim. `sendInvite` is the proof nothing was guessed:
-nobody asking for a user form imagines that field.
-
-The 422 landed on the email input as "Someone already has that email address."
-— a conflict the schema cannot express, delivered through the same channel as
-one it can. Correcting the address cleared it and the record was written. The
-agent then said, in words, what had happened both times.
-
-Three separations held throughout. The backend never learns what a form is. The
-runtime never learns what a user is — `boundaries.test.ts` asserts it imports
-nothing from the other two and never names one of their fields. The browser
-never learns a URL — it is given a resource and an operation, and looks the
-route up in the descriptor.
-
-Which is the deployment question answered: three repositories, one HTTP
-contract, no shared package.
-
----
-
-## F31 — A quota failure renders as a permanent loading skeleton `[hit]`
-
-Gemini's free tier refused a run with HTTP 429. The chat showed
-"Building interface · ~52 tokens" and kept showing it, indefinitely. Nothing in
-the conversation said the run had failed.
-
-The error was not swallowed — it reached the browser, as a `console.error`:
-
-```
-[CopilotKit] Error (agent_run_error_event): Failed after 3 attempts.
-Last error: You exceeded your current quota …
-* Quota exceeded for metric:
-  generativelanguage.googleapis.com/generate_content_free_tier_requests,
-  limit: 20, model: gemini-3.6-flash
-{"runtimeErrorCode":"INCOMPLETE_STREAM","agentId":"default"}
-```
-
-So the runtime knew, the client knew, and the only surface that did not say so
-was the one a person was looking at. `recovery: { debugExposure: 'verbose' }`
-was set and changed nothing here.
-
-This is the same failure shape as F2 and F9, and the worst one in the catalogue
-because it does not look like a failure. A spinner is a promise that something
-is still happening. Reproduce: exhaust the free tier, then send any message.
-
-**Consequence for anyone building on this:** an `INCOMPLETE_STREAM` needs
-handling in the client explicitly. Do not assume a failed run tells the person.
-
-## F32 — A completed A2UI render that painted nothing `[hit, unexplained]`
-
-Recorded because it is unresolved, not because it is understood.
-
-One run streamed cleanly to the end — captured by teeing `fetch` in the page:
-
-```
-RUN_STARTED
-TOOL_CALL_* ×2        list_resources, describe_resource   → results
-ACTIVITY_SNAPSHOT
-TOOL_CALL_* (render_a2ui) → {"status":"rendered"}
-RUN_FINISHED
-```
-
-The payload matched the injected tool's documented contract — flat component
-format, root component with `id: "root"`, which is what
-`@ag-ui/a2ui-middleware` 0.0.10 asks for and what `web_core`'s
-`processUpdateComponentsMessage` consumes (`const { id, component,
-...properties } = comp`). The catalog had the component registered — checked
-live: `catalog.components` is a `Map` of 6, including the one requested. The
-console carried no error. And the component never mounted: its renderer fetches
-on mount, and the backend logged no such request.
-
-So: valid payload, registered component, no error, `"rendered"`, nothing drawn.
-
-Not attributable to the quota exhaustion in F31 — that run terminated with
-`RUN_ERROR` and no tool result, a different signature. Investigation stopped
-when the free tier ran out. Whoever picks this up: tee the run endpoint's
-response body in the page, and compare a working render's payload against this
-one field by field.
-
----
-
-## F33 — `agent.runAgent()` loses the run context, and A2UI dies with it `[hit]`
-
-A row action that called `agent.runAgent()` directly produced a fatal, and
-completely misleading, error:
-
-```
-A2UI render error: Catalog not found:
-https://a2ui.org/specification/v0_9/basic_catalog.json
-```
-
-Nothing about the catalog was wrong. The injected tool's own instructions say
-the model must NOT choose a catalog:
-
-> the catalog id is set by the host, not by you. Do not include a catalogId
-> argument.
-
-The host finds it in the run's CONTEXT — `@ag-ui/a2ui-middleware` scans
-`context` for the entry whose description is the A2UI schema constant and reads
-`catalogId` out of its JSON value. That entry is assembled by CopilotKit's core,
-in `copilotkit.runAgent({ agent })`. Started straight off the agent, a run
-carries no context, the middleware falls back to its hardcoded basic-catalog id,
-and `@a2ui/web_core` throws from `processCreateSurfaceMessage` because the
-renderer is built as `new MessageProcessor([catalog ?? basicCatalog])` — a list
-of ONE, matched by exact id, with nothing to fall back to.
-
-Reproduce: call `agent.runAgent()` from a component while a custom catalog is
-configured. Fix: run through `useCopilotKit().copilotkit.runAgent({ agent })`.
-
-This also explains **F32**, which is now withdrawn as a separate finding: same
-cause, failing silently that time rather than loudly.
-
-## F34 — Every A2UI surface is clipped 1px on its left `[hit]`
-
-CopilotKit renders each surface inside a scroll viewport whose computed padding
-is `24px 0px` — vertical only. An `overflow` other than `visible` clips to the
-PADDING box, so the clip edge and a surface's left edge are the same pixel.
-
-shadcn's `ring-1` is a box-shadow with 1px spread, painted OUTSIDE the border
-box. At zero inset that pixel is outside the clip box and is shaved off, which
-reads as a broken layout rather than a clipped one — it happens at rest, with
-`scrollLeft: 0` and `scrollWidth === clientWidth`. Nothing is overflowing.
-
-Measured: card `left: 139`, clip box `left: 139`, card box-shadow
-`… 0px 0px 0px 1px`.
-
-Worth knowing: it cannot be fixed by dropping the overflow on one axis, because
-`overflow-x: visible` with `overflow-y: auto` computes back to `auto`. Either
-give the surface a horizontal inset, or lose vertical scrolling. A 2px margin on
-our own card is the smaller intervention and depends on none of their DOM.
-
----
-
-## F35 — `id` is A2UI's, and a prop by that name is eaten silently `[hit]`
-
-A component declaring a prop called `id` never receives it. `web_core`'s
-processor reads every node as the component's identity plus everything else:
-
-```js
-const { id, component, ...properties } = comp
-```
-
-So our ConfirmCard's `id` — which record to delete — became the COMPONENT's id.
-Three things then happened at once, none of them an error:
-
-1. `props.id` arrived `undefined`, so the card could not name a record.
-2. The component registered itself under the record's id, `"project_1"`.
-3. Its parent's `children: ["confirm_card"]` pointed at a component that no
-   longer existed, leaving a dangling tree.
-
-The surface drew nothing at all — a loading skeleton that never resolved — and
-the injected tool answered `{"status":"rendered"}`. Captured by teeing the run
-endpoint's response body in the page: `RUN_STARTED`, both discovery tools,
-`render_a2ui` → `"rendered"`, `RUN_FINISHED`, and a blank conversation.
-
-Reproduce: give any custom component a prop named `id` and reference it from a
-parent's `children`.
-
-The A2UI spec documents `id` as a component field. What is undocumented is that
-a catalog schema may declare the same name without complaint from either side —
-`createReactComponent` accepts it, the injected tool accepts it, and nothing
-warns. `component` collides the same way.
-
-**Consequence:** reserve `id` and `component` in any custom catalog. Ours is now
-`recordId`, and a test asserts no component in the catalog claims either name.
+## Smaller ones
+
+- **Two copies of React.** pnpm gives the A2UI renderer its own resolution;
+  two copies in one page throw "Invalid hook call", which reads like a
+  Rules-of-Hooks mistake in your own code. Fix with `resolve.dedupe`.
+- **`maxSteps` defaults to 1.** A2UI needs the agent to call an injected tool,
+  so one step paints nothing.
+- **Telemetry ships on**, announced in a startup line that is easy to miss.
+- **Surfaces are clipped 1px on the left.** CopilotKit's surface viewport has
+  vertical padding only, and `overflow` clips to the padding box — so shadcn's
+  `ring-1`, a box-shadow painted outside the border box, is shaved off.
+- **`shadcn add table` generated a broken import** and installed an unrelated
+  npm package called `cn` to satisfy it. Caught by the dependency boundary check.
+
+## One withdrawn
+
+An early finding claimed A2UI paints partial frames during streaming, and an
+architecture was recommended on that basis. Walking ~30 streaming prefixes
+disproved it. Recorded as withdrawn rather than deleted, because the argument
+had been made.

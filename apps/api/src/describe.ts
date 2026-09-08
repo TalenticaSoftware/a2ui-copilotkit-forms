@@ -2,17 +2,9 @@ import { z, type ZodType } from 'zod'
 import { zodToJsonSchema } from 'zod-to-json-schema'
 
 /**
- * The API, described.
- *
- * The premise: this server already knows every field it will accept, because it
- * validates against a zod schema before any logic runs. Publishing that first
- * declaration is what lets a client stop keeping a second one by hand — two
- * declarations of one fact drift, and the drift is invisible until someone
- * tries a save.
- *
- * The shape below is copied from Portal-Lite's `core/describe.ts` on purpose.
- * Same field names, same nesting. A descriptor format that differs per backend
- * is not a format.
+ * The API, described from the schemas it already validates against. Publishing
+ * that first declaration is what lets a client stop keeping a second one by
+ * hand — two declarations of one fact drift, invisibly, until someone saves.
  */
 
 export type OperationDescriptor = {
@@ -27,13 +19,7 @@ export type OperationDescriptor = {
   params?: unknown
   /** JSON Schema of the accepted body. Absent for operations that take none. */
   body?: unknown
-  /**
-   * JSON Schema of what comes back on success, under `data`.
-   *
-   * Added because a client that renders a LIST has to know the shape of what it
-   * is listing, and the alternative is assuming — which is the same mistake as
-   * hand-copying the request shape, one direction later (A2).
-   */
+  /** JSON Schema of what comes back under `data`. A client rendering a list needs the row shape. */
   returns?: unknown
 }
 
@@ -48,32 +34,16 @@ export type ResourceDescriptor = {
   resource: string
   operations: OperationDescriptor[]
   /**
-   * Properties that point at another resource, keyed by property name.
-   *
-   * A reference cannot be an enum: the valid values are whatever rows exist
-   * right now. Saying so here lets a client fill the dropdown from the other
-   * resource's `list` — options discovered at render time, without the data
-   * passing through a language model on the way.
+   * Properties holding another resource's id. A reference cannot be an enum —
+   * its valid values are whatever rows exist right now — so the client fills the
+   * dropdown from that resource's list.
    */
   references?: Record<string, ReferenceDescriptor>
-  /**
-   * How this API reports failure. One shape for every operation.
-   *
-   * Published rather than agreed in prose. `src/lib/api.ts` used to reach into
-   * `payload?.error?.fields` on faith, so a change to the envelope degraded to
-   * a bare status code with every per-field message dropped, silently. Now the
-   * envelope is part of the contract the client fetches.
-   */
+  /** How this API reports failure — published, rather than agreed in prose and assumed. */
   errors: unknown
 }
 
-/**
- * The failure envelope, declared once.
- *
- * `fields` is keyed by the BODY PROPERTY the message belongs to — not by a UI
- * path, which the API knows nothing about. Turning a property name into
- * somewhere on screen is the client's job.
- */
+/** The failure envelope. `fields` is keyed by body property; mapping that to the screen is the client's job. */
 export const errorSchema = z.object({
   message: z.string().describe('One line, written for a person to read.'),
   fields: z
@@ -83,16 +53,9 @@ export const errorSchema = z.object({
 })
 
 /**
- * zod to JSON Schema, inlined.
- *
- * `$refStrategy: 'none'` because the reader is a language model composing a
- * form, not a validator: a `$ref` pointing into `definitions` is one more hop
- * for it to get wrong, and these schemas are small enough that inlining costs
- * nothing.
- *
- * We reach for this package rather than zod's own `z.toJSONSchema` because that
- * arrived in zod 4, and this project is pinned to zod 3 — A2UI's binder reads
- * `_def.typeName` to classify props, which zod 4 does not set (F25).
+ * zod to JSON Schema, inlined (`$refStrategy: 'none'`): the reader is a language
+ * model, not a validator, and a `$ref` is one more hop to get wrong. This package
+ * rather than zod's own, because `z.toJSONSchema` is zod 4 and we are on zod 3 (F25).
  */
 export const json = (schema: ZodType) => zodToJsonSchema(schema, { $refStrategy: 'none' })
 
