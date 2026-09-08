@@ -1,5 +1,5 @@
 {
-  "name": "@prompt-to-form/runtime",
+  "name": "@a2ui-copilotkit-forms/runtime",
   "private": true,
   "version": "0.0.0",
   "type": "module",

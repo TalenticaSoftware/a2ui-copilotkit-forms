@@ -49,7 +49,7 @@ const keyVariable = accepted.find((name) => process.env[name])
 
 if (!keyVariable) {
   console.error(`[config] MODEL="${MODEL}" needs one of: ${accepted.join(' or ')}.`)
-  console.error('[config] Put it in prompt-to-form/.env — see .env.example.')
+  console.error('[config] Put it in .env at the repository root — see .env.example.')
   process.exit(1)
 }
 

@@ -10,7 +10,7 @@ import { z } from 'zod'
  */
 
 /** How this catalog is named on the wire. */
-export const CATALOG_ID = 'prompt-to-form/v1'
+export const CATALOG_ID = 'a2ui-copilotkit-forms/v1'
 
 /**
  * Values bind to the data model. It MUST be a union including `{ path }`: A2UI's

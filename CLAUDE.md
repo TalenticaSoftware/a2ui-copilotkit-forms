@@ -1,4 +1,4 @@
-# Prompt to form
+# a2ui-copilotkit-forms
 
 A chat that derives its forms from the API it posts to. Read
 [docs/scope.md](docs/scope.md) first; [docs/findings.md](docs/findings.md) and

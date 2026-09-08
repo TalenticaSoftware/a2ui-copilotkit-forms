@@ -1,17 +1,17 @@
 {
-  "name": "prompt-to-form",
+  "name": "a2ui-copilotkit-forms",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "description": "Say what you want to do; the agent reads the API's schema and draws the form.",
   "scripts": {
     "boundaries": "tsx scripts/check-boundaries.ts",
-    "build": "pnpm --filter @prompt-to-form/web build",
+    "build": "pnpm --filter @a2ui-copilotkit-forms/web build",
     "check": "pnpm typecheck && pnpm lint && pnpm boundaries",
     "dev:all": "concurrently -k -n web,runtime,api -c cyan,magenta,green \"pnpm dev:web\" \"pnpm dev:runtime\" \"pnpm dev:api\"",
-    "dev:api": "pnpm --filter @prompt-to-form/api dev",
-    "dev:runtime": "pnpm --filter @prompt-to-form/runtime dev",
-    "dev:web": "pnpm --filter @prompt-to-form/web dev",
+    "dev:api": "pnpm --filter @a2ui-copilotkit-forms/api dev",
+    "dev:runtime": "pnpm --filter @a2ui-copilotkit-forms/runtime dev",
+    "dev:web": "pnpm --filter @a2ui-copilotkit-forms/web dev",
     "lint": "oxlint apps boundaries.test.ts",
     "typecheck": "tsc -b"
   },

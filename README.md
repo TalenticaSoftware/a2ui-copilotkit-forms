@@ -1,4 +1,6 @@
-# Prompt to form
+# a2ui-copilotkit-forms
+
+> Forms derived from the API you post to, drawn by an agent, in shadcn/ui.
 
 Say what you want to do — *"I want to add a user"* — and an agent reads the
 API's own schema, draws a form from it in **shadcn/ui**, and saves.
